@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#EDEFF2">
+<title>What's in the Box</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --paper:#EDEFF2;
+  --card:#FFFFFF;
+  --ink:#111418;
+  --muted:#616C7A;
+  --line:#D2D8DF;
+  --signal:#1B4FD8;
+  --tag:#F5C400;
+  --warn:#B3261E;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --pad: env(safe-area-inset-bottom, 0px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--sans);
+  background:var(--paper);
+  color:var(--ink);
+  -webkit-text-size-adjust:100%;
+  padding-bottom:calc(72px + var(--pad));
+}
+h1,h2,h3{margin:0;font-weight:640;letter-spacing:-0.01em}
+.eyebrow{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+header{
+  position:sticky;top:0;z-index:20;
+  background:var(--paper);
+  border-bottom:1px solid var(--line);
+  padding:14px 16px 12px;
+}
+header .row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+main{padding:16px;max-width:720px;margin:0 auto}
+.view{display:none}
+.view.active{display:block}
+
+/* the accession chip: the one loud element */
+.chip{
+  display:inline-block;
+  font-family:var(--mono);
+  font-weight:700;
+  font-size:13px;
+  letter-spacing:0.06em;
+  background:var(--tag);
+  color:#000;
+  padding:4px 8px;
+  border-radius:3px;
+  white-space:nowrap;
+}
+.chip.lg{font-size:20px;padding:7px 12px;letter-spacing:0.08em}
+.chip.muted{background:var(--line);color:var(--muted)}
+
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:14px;
+  margin-bottom:12px;
+}
+label.field{display:block;margin:0 0 14px}
+label.field span{display:block;margin-bottom:6px}
+input[type=text],input[type=password],textarea,select{
+  width:100%;
+  font:inherit;
+  font-size:16px; /* prevents iOS zoom on focus */
+  padding:11px 12px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--card);
+  color:var(--ink);
+}
+textarea{min-height:70px;resize:vertical}
+button{
+  font:inherit;font-weight:600;font-size:15px;
+  border:1px solid var(--line);
+  background:var(--card);color:var(--ink);
+  padding:11px 14px;border-radius:8px;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+button:active{transform:translateY(1px)}
+button.primary{background:var(--signal);border-color:var(--signal);color:#fff}
+button.danger{color:var(--warn);border-color:#E9C9C6}
+button:disabled{opacity:.45}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{
+  outline:2px solid var(--signal);outline-offset:2px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+
+/* capture */
+.shutter{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;width:100%;padding:38px 0;
+  border:1.5px dashed var(--line);border-radius:14px;background:var(--card);
+}
+.shutter strong{font-size:19px}
+.shutter em{font-style:normal;color:var(--muted);font-size:13px}
+#shot{display:none}
+.pending{display:flex;gap:12px;align-items:center;margin-top:12px}
+.pending img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+
+/* item list */
+.item{display:flex;gap:12px;align-items:flex-start}
+.item img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:0 0 auto;background:var(--line)}
+.item .body{min-width:0;flex:1}
+.item h3{font-size:16px;line-height:1.25}
+.item p{margin:4px 0 0;font-size:13px;color:var(--muted);line-height:1.4}
+.meta{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pill{
+  font-family:var(--mono);font-size:11px;letter-spacing:.04em;
+  border:1px solid var(--line);border-radius:100px;padding:2px 8px;color:var(--muted)}
+.empty{text-align:center;color:var(--muted);padding:44px 20px;font-size:14px;line-height:1.6}
+.empty strong{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
+
+/* nav */
+nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;
+  display:grid;grid-template-columns:repeat(4,1fr);
+  background:var(--card);border-top:1px solid var(--line);
+  padding-bottom:var(--pad);
+}
+nav button{
+  border:0;border-radius:0;background:none;
+  padding:11px 4px 12px;font-size:11px;font-weight:600;color:var(--muted);
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;
+}
+nav button svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7}
+nav button[aria-current=page]{color:var(--ink)}
+nav button[aria-current=page] svg{stroke:var(--signal)}
+
+.status{
+  position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(84px + var(--pad));z-index:40;
+  background:var(--ink);color:#fff;font-size:13px;font-weight:600;
+  padding:9px 15px;border-radius:100px;opacity:0;pointer-events:none;
+  transition:opacity .18s ease;max-width:88vw;text-align:center;
+}
+.status.on{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* print sheet */
+#sheet{display:none}
+.label{
+  border:1px dashed #999;border-radius:6px;padding:10px;
+  display:flex;gap:10px;align-items:center;break-inside:avoid;
+}
+.label svg{width:74px;height:74px;flex:0 0 auto}
+.label .code{font-family:var(--mono);font-weight:700;font-size:17px;letter-spacing:.06em}
+.label .name{font-size:12px;color:#333;margin-top:2px}
+.label .line{margin-top:7px;border-top:1px solid #bbb;font-size:9px;color:#777;padding-top:2px;font-family:var(--mono)}
+@media print{
+  body{background:#fff;padding:0}
+  header,nav,main,.status{display:none!important}
+  #sheet{display:grid!important;grid-template-columns:1fr 1fr;gap:8mm;padding:8mm}
+  .label{border-color:#bbb}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="row">
+    <div>
+      <div class="eyebrow">Storage register</div>
+      <h1 style="font-size:21px">What's in the box</h1>
+    </div>
+    <div id="ctxBox"></div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ===== CAPTURE ===== -->
+  <section id="v-capture" class="view active">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Packing into</div>
+      <select id="boxPick" aria-label="Box being packed"></select>
+      <div class="btnrow" style="margin-top:10px">
+        <button id="newBoxQuick">New box</button>
+        <button id="sealBox">Seal box</button>
+      </div>
+    </div>
+
+    <label class="shutter" for="shot">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#111418" stroke-width="1.6">
+        <path d="M3 8.5A2.5 2.5 0 015.5 6h1.7l1.2-2h7.2l1.2 2h1.7A2.5 2.5 0 0121 8.5v9A2.5 2.5 0 0118.5 20h-13A2.5 2.5 0 013 17.5z"/>
+        <circle cx="12" cy="13" r="3.6"/></svg>
+      <strong>Photograph an object</strong>
+      <em>One object per photo</em>
+    </label>
+    <input type="file" id="shot" accept="image/*" capture="environment">
+
+    <div id="lastAdded"></div>
+
+    <div class="card" id="queueCard" style="display:none">
+      <div class="eyebrow" style="margin-bottom:8px">Waiting to be identified</div>
+      <div id="queueList"></div>
+      <button class="primary" id="runQueue" style="width:100%;margin-top:10px">Identify now</button>
+    </div>
+  </section>
+
+  <!-- ===== BOXES ===== -->
+  <section id="v-boxes" class="view">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Add a box</div>
+      <label class="field"><span>What is it, and where does it live?</span>
+        <input type="text" id="boxName" placeholder="Kitchen, top of hall cupboard"></label>
+      <button class="primary" id="addBox" style="width:100%">Create box</button>
+    </div>
+    <div class="btnrow" style="margin-bottom:12px">
+      <button id="printAll">Print all labels</button>
+    </div>
+    <div id="boxList"></div>
+  </section>
+
+  <!-- ===== SEARCH ===== -->
+  <section id="v-search" class="view">
+    <input type="text" id="q" placeholder="Search objects, materials, text on labels" autocomplete="off" enterkeyhint="search">
+    <div class="btnrow" style="margin:10px 0 14px">
+      <select id="filterBox" style="flex:1" aria-label="Filter by box"></select>
+    </div>
+    <div id="results"></div>
+  </section>
+
+  <!-- ===== SETTINGS ===== -->
+  <section id="v-settings" class="view">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Identification</div>
+      <label class="field"><span>Anthropic API key. Stored on this phone only.</span>
+        <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off"></label>
+      <label class="field"><span>Model</span>
+        <select id="model">
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5 (cheapest, good enough)</option>
+          <option value="claude-sonnet-5">Sonnet 5 (better on faint text)</option>
+        </select></label>
+      <button class="primary" id="saveSettings" style="width:100%">Save</button>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Your data</div>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5">
+        Everything lives in this browser. Export before clearing Safari data, changing phone, or trusting it with anything you cannot photograph twice.</p>
+      <div class="btnrow">
+        <button id="exportJson">Export catalogue</button>
+        <button id="exportPhotos">Export photos</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Storage used</div>
+      <div id="usage" style="font-family:var(--mono);font-size:13px">counting…</div>
+    </div>
+  </section>
+
+</main>
+
+<nav>
+  <button data-go="capture" aria-current="page">
+    <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 015.5 6h1.7l1.2-2h7.2l1.2 2h1.7A2.5 2.5 0 0121 8.5v9A2.5 2.5 0 0118.5 20h-13A2.5 2.5 0 013 17.5z"/><circle cx="12" cy="13" r="3.6"/></svg>
+    Capture</button>
+  <button data-go="boxes">
+    <svg viewBox="0 0 24 24"><path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5L12 12l9-4.5M12 12v9"/></svg>
+    Boxes</button>
+  <button data-go="search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+    Find</button>
+  <button data-go="settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3"/></svg>
+    Setup</button>
+</nav>
+
+<div class="status" id="toast" role="status" aria-live="polite"></div>
+<div id="sheet"></div>
+
+<script src="qrcode.js"></script>
+<script>
+/* ---------------- storage ---------------- */
+const DB_NAME='whatsinthebox', DB_VER=1;
+let db;
+
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('boxes')) d.createObjectStore('boxes',{keyPath:'code'});
+      if(!d.objectStoreNames.contains('items')){
+        const s=d.createObjectStore('items',{keyPath:'id',autoIncrement:true});
+        s.createIndex('box','box'); s.createIndex('state','state');
+      }
+      if(!d.objectStoreNames.contains('settings')) d.createObjectStore('settings',{keyPath:'k'});
+    };
+    r.onsuccess=e=>res(e.target.result);
+    r.onerror=()=>rej(r.error);
+  });
+}
+const tx=(store,mode='readonly')=>db.transaction(store,mode).objectStore(store);
+const req=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const getAll=s=>req(tx(s).getAll());
+const put=(s,v)=>req(tx(s,'readwrite').put(v));
+const del=(s,k)=>req(tx(s,'readwrite').delete(k));
+const get=(s,k)=>req(tx(s).get(k));
+
+/* ---------------- ui helpers ---------------- */
+const $=id=>document.getElementById(id);
+let toastTimer;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.classList.add('on');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('on'),2600);
+}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+document.querySelectorAll('nav button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('nav button').forEach(x=>x.removeAttribute('aria-current'));
+    b.setAttribute('aria-current','page');
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    $('v-'+b.dataset.go).classList.add('active');
+    if(b.dataset.go==='search') renderResults();
+    if(b.dataset.go==='boxes') renderBoxes();
+    if(b.dataset.go==='settings') showUsage();
+    window.scrollTo(0,0);
+  };
+});
+
+/* ---------------- boxes ---------------- */
+let state={box:null, key:'', model:'claude-haiku-4-5-20251001'};
+
+function nextCode(boxes){
+  const n=boxes.reduce((m,b)=>Math.max(m,parseInt(b.code.slice(4),10)||0),0)+1;
+  return 'BOX-'+String(n).padStart(3,'0');
+}
+async function createBox(name){
+  const boxes=await getAll('boxes');
+  const box={code:nextCode(boxes), name:name||'', created:Date.now(), sealed:null};
+  await put('boxes',box);
+  state.box=box.code; await put('settings',{k:'box',v:box.code});
+  await refreshBoxSelects();
+  toast(box.code+' created');
+  return box;
+}
+async function refreshBoxSelects(){
+  const boxes=(await getAll('boxes')).sort((a,b)=>a.code<b.code?1:-1);
+  const opt=b=>`<option value="${b.code}">${esc(b.code)}${b.name?'  '+esc(b.name):''}${b.sealed?' (sealed)':''}</option>`;
+  $('boxPick').innerHTML = boxes.length? boxes.map(opt).join('') : '<option value="">No boxes yet</option>';
+  if(state.box) $('boxPick').value=state.box;
+  else if(boxes.length){ state.box=boxes[0].code; $('boxPick').value=state.box; }
+  $('filterBox').innerHTML='<option value="">Every box</option>'+boxes.map(opt).join('');
+  const cur=boxes.find(b=>b.code===state.box);
+  $('ctxBox').innerHTML = cur? `<span class="chip">${esc(cur.code)}</span>` : '';
+}
+$('boxPick').onchange=async e=>{ state.box=e.target.value; await put('settings',{k:'box',v:state.box}); refreshBoxSelects(); };
+$('newBoxQuick').onclick=()=>createBox('');
+$('addBox').onclick=async()=>{ await createBox($('boxName').value.trim()); $('boxName').value=''; renderBoxes(); };
+$('sealBox').onclick=async()=>{
+  if(!state.box) return toast('No box selected');
+  const b=await get('boxes',state.box); b.sealed=Date.now(); await put('boxes',b);
+  await refreshBoxSelects(); toast(b.code+' sealed');
+};
+
+async function renderBoxes(){
+  const boxes=(await getAll('boxes')).sort((a,b)=>a.code<b.code?1:-1);
+  const items=await getAll('items');
+  if(!boxes.length){ $('boxList').innerHTML=`<div class="empty"><strong>No boxes yet</strong>Create one, print its label, then start photographing what goes in.</div>`; return; }
+  $('boxList').innerHTML=boxes.map(b=>{
+    const n=items.filter(i=>i.box===b.code).length;
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div><span class="chip">${esc(b.code)}</span>
+          <div style="margin-top:7px;font-weight:600">${esc(b.name||'Unlabelled')}</div>
+          <div class="meta"><span class="pill">${n} object${n===1?'':'s'}</span>
+          ${b.sealed?'<span class="pill">sealed</span>':''}</div></div>
+        <div class="btnrow" style="flex-direction:column">
+          <button data-print="${b.code}">Label</button>
+          <button data-view="${b.code}">Contents</button>
+        </div>
+      </div></div>`;
+  }).join('');
+  $('boxList').querySelectorAll('[data-print]').forEach(b=>b.onclick=()=>printLabels([b.dataset.print]));
+  $('boxList').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{
+    $('filterBox').value=b.dataset.view; $('q').value='';
+    document.querySelector('nav button[data-go=search]').click();
+  });
+}
+
+/* ---------------- labels ---------------- */
+function qrSvg(text){
+  const q=qrcode(0,'M'); q.addData(text); q.make();
+  return q.createSvgTag({cellSize:3,margin:2,scalable:true,alt:text});
+}
+async function printLabels(codes){
+  const boxes=await getAll('boxes');
+  const list=boxes.filter(b=>codes.includes(b.code));
+  if(!list.length) return toast('Nothing to print');
+  $('sheet').innerHTML=list.map(b=>`
+    <div class="label">
+      ${qrSvg(b.code)}
+      <div>
+        <div class="code">${esc(b.code)}</div>
+        <div class="name">${esc(b.name||'')}</div>
+        <div class="line">PACKED ____________________</div>
+      </div>
+    </div>`).join('');
+  setTimeout(()=>window.print(),120);
+}
+$('printAll').onclick=async()=>{ const b=await getAll('boxes'); printLabels(b.map(x=>x.code)); };
+
+/* ---------------- capture ---------------- */
+function draw(src,edge,quality){
+  const s=Math.min(1,edge/Math.max(src.width,src.height));
+  const c=document.createElement('canvas');
+  c.width=Math.round(src.width*s); c.height=Math.round(src.height*s);
+  c.getContext('2d').drawImage(src,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',quality);
+}
+async function resize(file,edge,quality){
+  // createImageBitmap applies EXIF rotation, so photos taken sideways
+  // reach the model the right way up.
+  if(self.createImageBitmap){
+    try{
+      const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
+      const out=draw(bmp,edge,quality); bmp.close(); return out;
+    }catch(e){ /* fall through */ }
+  }
+  return new Promise((res,rej)=>{
+    const img=new Image(), url=URL.createObjectURL(file);
+    img.onload=()=>{ const out=draw(img,edge,quality); URL.revokeObjectURL(url); res(out); };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('Could not read that image'))};
+    img.src=url;
+  });
+}
+const b64=d=>d.split(',')[1];
+
+$('shot').onchange=async e=>{
+  const file=e.target.files[0]; e.target.value='';
+  if(!file) return;
+  if(!state.box){ await createBox(''); }
+  try{
+    const [full,thumb]=await Promise.all([resize(file,1024,.85), resize(file,320,.7)]);
+    const item={box:state.box, full, thumb, state:'pending', created:Date.now(),
+                title:'Not identified yet', tags:[]};
+    const id=await put('items',item); item.id=id;
+    showLast(item);
+    renderQueue();
+    if(state.key) classify(id);
+  }catch(err){ toast(err.message); }
+};
+
+function showLast(item){
+  $('lastAdded').innerHTML=`<div class="card"><div class="item">
+    <img src="${item.thumb}" alt="">
+    <div class="body"><h3 id="lastTitle">${esc(item.title)}</h3>
+      <p id="lastSub">Saved to ${esc(item.box)}</p></div></div></div>`;
+}
+
+async function renderQueue(){
+  const items=(await getAll('items')).filter(i=>i.state==='pending');
+  $('queueCard').style.display = items.length? 'block':'none';
+  $('queueList').innerHTML=items.slice(0,6).map(i=>
+    `<div class="pending"><img src="${i.thumb}" alt=""><div><div style="font-weight:600;font-size:14px">Waiting</div>
+     <div style="font-size:12px;color:var(--muted)">${esc(i.box)}</div></div></div>`).join('')
+     + (items.length>6?`<p style="font-size:13px;color:var(--muted)">and ${items.length-6} more</p>`:'');
+}
+$('runQueue').onclick=async()=>{
+  if(!state.key) return toast('Add your API key under Setup');
+  const items=(await getAll('items')).filter(i=>i.state==='pending');
+  for(const i of items){ await classify(i.id); }
+};
+
+/* ---------------- identification ---------------- */
+const SCHEMA=`{
+ "title": "3-6 words naming the object plainly",
+ "category": "one of: book, tool, kitchen, electronics, clothing, document, toy, art, furniture, sports, hobby, coin, jewellery, other",
+ "material": "dominant material",
+ "colour": "dominant colour",
+ "approx_size_cm": "longest dimension estimate, number only",
+ "visible_text": "any text, brand, model number or title legible in the photo, verbatim; empty string if none",
+ "condition": "one of: new, good, worn, damaged, unknown",
+ "tags": ["3 to 6 lowercase search keywords"],
+ "confidence": 0.0
+}`;
+
+async function classify(id){
+  const item=await get('items',id);
+  if(!item||item.state==='done') return;
+  await put('items',{...item,state:'working'});
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'x-api-key':state.key,
+        'anthropic-version':'2023-06-01',
+        'content-type':'application/json',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({
+        model:state.model, max_tokens:400,
+        system:'You catalogue household objects being packed into storage. Reply with one JSON object and nothing else. No markdown, no code fences, no commentary. If unsure of a field use "unknown".',
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64(item.full)}},
+          {type:'text',text:'Identify this object for a storage catalogue. Return exactly this JSON shape:\n'+SCHEMA}
+        ]}]
+      })
+    });
+    if(!r.ok){
+      const e=await r.json().catch(()=>({}));
+      throw new Error(e.error?.message || ('API returned '+r.status));
+    }
+    const data=await r.json();
+    const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+    const clean=text.replace(/```json|```/g,'').trim();
+    const o=JSON.parse(clean);
+    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done'});
+    if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
+    renderQueue();
+  }catch(err){
+    await put('items',{...item,state:'pending'});
+    toast(err.message);
+  }
+}
+
+/* ---------------- search ---------------- */
+function hay(i){
+  return [i.title,i.category,i.material,i.colour,i.visible_text,i.condition,(i.tags||[]).join(' '),i.box]
+    .join(' ').toLowerCase();
+}
+async function renderResults(){
+  const q=$('q').value.trim().toLowerCase();
+  const boxf=$('filterBox').value;
+  let items=(await getAll('items')).sort((a,b)=>b.created-a.created);
+  if(boxf) items=items.filter(i=>i.box===boxf);
+  if(q){ const terms=q.split(/\s+/); items=items.filter(i=>{const h=hay(i);return terms.every(t=>h.includes(t))}); }
+  if(!items.length){
+    $('results').innerHTML=`<div class="empty"><strong>Nothing here</strong>${q?'No object matches those words. Try the material or a word printed on it.':'Photograph something on the Capture tab and it will appear here.'}</div>`;
+    return;
+  }
+  $('results').innerHTML=items.map(i=>`<div class="card"><div class="item">
+    <img src="${i.thumb}" alt="" loading="lazy">
+    <div class="body">
+      <h3>${esc(i.title)}</h3>
+      ${i.visible_text?`<p>“${esc(i.visible_text)}”</p>`:''}
+      <div class="meta">
+        <span class="chip">${esc(i.box)}</span>
+        ${i.category?`<span class="pill">${esc(i.category)}</span>`:''}
+        ${i.material?`<span class="pill">${esc(i.material)}</span>`:''}
+        ${i.state!=='done'?'<span class="pill">not identified</span>':''}
+      </div>
+    </div>
+    <button data-del="${i.id}" class="danger" aria-label="Delete">✕</button>
+  </div></div>`).join('');
+  $('results').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+    await del('items',Number(b.dataset.del)); renderResults(); toast('Deleted');
+  });
+}
+$('q').oninput=renderResults;
+$('filterBox').onchange=renderResults;
+
+/* ---------------- settings ---------------- */
+$('saveSettings').onclick=async()=>{
+  state.key=$('apiKey').value.trim(); state.model=$('model').value;
+  await put('settings',{k:'key',v:state.key});
+  await put('settings',{k:'model',v:state.model});
+  toast('Saved');
+};
+function download(name,blob){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+$('exportJson').onclick=async()=>{
+  const [boxes,items]=await Promise.all([getAll('boxes'),getAll('items')]);
+  const slim=items.map(({full,thumb,...rest})=>rest);
+  download('whatsinthebox-catalogue.json',new Blob([JSON.stringify({boxes,items:slim},null,2)],{type:'application/json'}));
+};
+$('exportPhotos').onclick=async()=>{
+  const items=await getAll('items');
+  const doc=`<!doctype html><meta charset=utf-8><title>What's in the Box photos</title>
+  <style>body{font-family:sans-serif;background:#111;color:#eee}figure{display:inline-block;margin:8px;width:220px}
+  img{width:100%;border-radius:6px}figcaption{font-size:12px;margin-top:4px}</style>`+
+  items.map(i=>`<figure><img src="${i.full}"><figcaption>${esc(i.box)} · ${esc(i.title)}</figcaption></figure>`).join('');
+  download('whatsinthebox-photos.html',new Blob([doc],{type:'text/html'}));
+};
+async function showUsage(){
+  const items=await getAll('items');
+  let bytes=0; items.forEach(i=>bytes+=(i.full?.length||0)+(i.thumb?.length||0));
+  let quota='';
+  if(navigator.storage?.estimate){
+    const e=await navigator.storage.estimate();
+    if(e.quota) quota=' of about '+(e.quota/1048576/1024).toFixed(1)+' GB available';
+  }
+  $('usage').textContent=items.length+' objects, '+(bytes/1048576).toFixed(1)+' MB'+quota;
+}
+
+/* ---------------- boot ---------------- */
+(async()=>{
+  try{ db=await openDB(); }
+  catch(e){ document.body.innerHTML='<p style="padding:24px;font-family:sans-serif">This browser is blocking local storage, so the catalogue cannot be kept. Open the app from its own address rather than inside another page.</p>'; return; }
+  const s=await getAll('settings'); const m=Object.fromEntries(s.map(x=>[x.k,x.v]));
+  state.key=m.key||''; state.model=m.model||state.model; state.box=m.box||null;
+  $('apiKey').value=state.key; $('model').value=state.model;
+  await refreshBoxSelects(); renderQueue();
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+  if(!state.key) toast('Add your API key under Setup');
+})();
+</script>
+</body>
+</html>
