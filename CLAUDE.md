@@ -10,8 +10,9 @@ Android Chrome also supported for install/camera/PWA).
 
 - **No build step.** Vanilla JS, no bundler, no npm at runtime, no framework.
   The app must run by opening `index.html` from a static host.
-- **No server the user administers.** Static hosting plus two third-party APIs
-  is the whole architecture. Do not propose a backend.
+- **No server the user administers.** Static hosting plus third-party APIs
+  (Anthropic, Microsoft Graph, Open Library) is the whole architecture. Do
+  not propose a backend.
 - **Offline-tolerant.** Packing happens in cellars and lofts. Capture must
   never block on the network; unidentified photos queue and process later.
 - **IndexedDB only** for persistence. No `localStorage`, no `sessionStorage`.
@@ -36,6 +37,8 @@ Android Chrome also supported for install/camera/PWA).
 | Both phones share one dedicated Microsoft account for sync, not two personal accounts | First built against two separate personal accounts, needing the broad `Files.ReadWrite` scope so the non-owner phone could reach a folder shared from the other's account. That scope reaches the *entire* OneDrive, including anything unrelated already stored there - reconsidered once that was fully understood. One dedicated account (`frozenfas.apps@outlook.com`), used for nothing else, lets the app request the narrow `Files.ReadWrite.AppFolder` scope instead. Traded a shared login for meaningfully less access. |
 | Houses are the top-level entity, above boxes, and are themselves synced | Not a hypothetical: the two people using this app pack at two genuinely different physical addresses. Houses sync as their own small list (`houses.json`, merged by `uid`), and every box carries the real house it belongs to through sync (via that `uid`, translated to each device's own local house id) rather than being force-reassigned to whatever house happens to exist locally. Chosen over keeping the two houses' catalogues fully separate: both are visible and searchable from either phone, clearly labelled which house each box is in — useful for "is this at ours or at hers?" A switcher on the Boxes tab creates/renames/selects the active house. |
 | `DB_VER` only ever increases; migrations are additive | The catalogue is the only copy of months of packing data on someone's phone. See "Data model versioning" below — this is the pattern every future schema change must follow. |
+| Open Library over Google Books for book lookup | Google Books' unauthenticated quota is zero (`quota_limit_value: "0"`, confirmed by an actual 429) - not rate-limited under load, categorically blocked without an API key. Adding a Google Cloud project/key wasn't worth the setup cost this session already paid once for Azure. Open Library needs no key and was confirmed working, including on a Spanish-language title, from this deployment's real origin. |
+| Rarity/value flagging is one extra field on the existing Claude call, not a second call | Keeps the cost impact marginal (a few dozen tokens) and spread across every category, not doubled for books specifically. Combined for free with Open Library's `edition_count` where available. Never a real appraisal - see roadmap item 5. |
 
 ## Files
 
@@ -54,7 +57,7 @@ boxes    { code: "BOX-001", uid, name, created, updated,      keyPath: code
 items    { id, uid, box, full, thumb, state, created,         keyPath: id (auto)
            updated, title, category, material, colour,        indexes: box, state
            approx_size_cm, visible_text, condition,
-           tags[], confidence }
+           rarity_notes, book, tags[], confidence }
 settings { k, v }                                              keyPath: k
 ```
 
@@ -69,6 +72,20 @@ stamped onto each box created there — no way to read an actual device name
 from a web page, so this is manual, not inferred. Items don't carry `house`
 directly; they're scoped to a house through their box, so moving a box
 between houses (not yet exposed in the UI) would only need one write.
+
+`item.rarity_notes` comes from the same Claude call as everything else -
+one more field in `SCHEMA`, not a second API call, so it costs a few dozen
+extra tokens on every photo rather than doubling the cost of any category.
+`item.book` (`{title, author, year, isbn, cover, editionCount}` or `null`)
+is additive metadata from Open Library, fetched only when `category` comes
+back `"book"` - never merged into or overwriting Claude's own fields,
+because Open Library's data isn't always reliable (a real ISBN looked up
+during testing returned a completely mismatched, self-published record).
+`worthLook(item)` in `index.html` combines `rarity_notes` with a free
+heuristic (a book with very few known editions on Open Library, `editionCount
+<= 5`) into a single "worth a second look" flag - neither signal is a real
+appraisal, both are free, and genuine valuation stays a human step, same
+answer as the paintings/antiques case in the roadmap below.
 
 `updated` (on houses, boxes, and items) and `uid` (on houses, boxes, and
 items) exist for sync, not the UI. `updated` decides which side wins when
@@ -241,13 +258,15 @@ the install prompt works without any certificate.
    browser PWA is reached; the documented native Swift + CloudKit path
    (see Background in README) is what actually scales to a million photos,
    because it gets real sync and storage outside the browser sandbox.
-5. Category-specific enrichment behind one resolver interface: books via
-   OpenLibrary, coins via Numista, stamps and other catalogued collectibles
-   via similar structured lookups where a free/affordable API exists —
-   including flagging items that look valuable or rare (e.g. a coin or
-   stamp the API marks as a scarce date/variant) rather than just filling
-   in fields. Paintings, sculpture, and furniture don't have an equivalent
-   of an ISBN or catalogue number to look up, and no affordable structured
+5. Category-specific enrichment behind one resolver interface. **Books:
+   done** - Open Library lookup by title (auto) or ISBN (manual retry when
+   the title search doesn't match), plus the `rarity_notes` /
+   `worthLook()` flag described above. Coins via Numista are next, same
+   shape: additive metadata, never overwriting Claude's own fields, no
+   silent trust of a free API's data. Stamps and other catalogued
+   collectibles via similar structured lookups where a free/affordable API
+   exists. Paintings, sculpture, and furniture don't have an equivalent of
+   an ISBN or catalogue number to look up, and no affordable structured
    database of maker's marks or auction records exists to query. For that
    category the realistic scope is not automated identification — it's
    flagging the item (e.g. low classifier confidence, or a visible

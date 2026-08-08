@@ -13,8 +13,13 @@ Phone (Safari on iPhone, Chrome on Android; installed to home screen)
   |
   |-- static files ......... GitHub Pages or Cloudflare Pages
   |-- one call per photo ... api.anthropic.com
+  |-- book lookups .......... openlibrary.org (books only, no key needed)
+  |-- sync, if connected .... login.microsoftonline.com, graph.microsoft.com
   |-- catalogue + photos ... IndexedDB on the device
 ```
+
+Everything this app talks to, and why, is also listed on the Setup tab
+under "Connected services."
 
 Nothing of yours listens for inbound connections. The phone makes outbound
 calls only, the same way any app on it does. The static host holds no data and
@@ -70,6 +75,26 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
    this searches across *every* house, each result labelled which one
    it's in.
 
+## Book lookup
+
+Anything identified as a book gets an automatic, free lookup against Open
+Library (title/author, no account or key needed) — shown under the item as
+supplementary info, never overwriting what Claude itself identified. Open
+Library's data isn't always right (a real ISBN looked up while building
+this returned a completely different, mismatched book), so treat it as a
+second opinion to glance at, not a fact.
+
+If the automatic lookup doesn't find a match, a **"Photograph copyright
+page"** button appears on that item — take a photo of the page inside the
+book with the ISBN and publisher details (more reliable than the cover),
+and it looks up that exact edition instead of guessing from the title.
+
+Anything that looks unusual — a book with very few editions on Open
+Library, or Claude noticing a first-edition mark, signature, or similar
+while identifying *any* object — shows as "Worth a look." That's a nudge
+to look closer yourself, not a valuation; nothing here can tell you what
+something is actually worth.
+
 ## Syncing two phones (OneDrive)
 
 Setup is a one-time thing, already done for this deployment: an Azure app
@@ -106,7 +131,10 @@ constant or the old shell keeps being served.
 
 Photos are resized to 1024 px before sending, landing around 1,400 input
 tokens each. On Haiku 4.5 that is roughly one to two euros per thousand
-objects.
+objects. The rarity/"worth a look" check rides along on that same call
+(a few dozen extra tokens, not a second call), so it doesn't meaningfully
+change this. Book lookups are free and don't touch the Anthropic bill at
+all.
 
 ## Known limits of this prototype
 

@@ -291,6 +291,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
       <select id="filterBox" style="flex:1" aria-label="Filter by box"></select>
     </div>
     <div id="results"></div>
+    <input type="file" id="isbnShot" accept="image/*" capture="environment" style="display:none">
   </section>
 
   <!-- ===== SETTINGS ===== -->
@@ -335,6 +336,15 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
     <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">Storage used</div>
       <div id="usage" style="font-family:var(--mono);font-size:13px">counting…</div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Connected services</div>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.5">Everything this app talks to outside your phone, and why.</p>
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr><td style="padding:6px 0;vertical-align:top"><strong>Anthropic</strong><br><span style="color:var(--muted)">api.anthropic.com</span></td><td style="padding:6px 0;color:var(--muted);text-align:right">Identifies each photo. Your key, sent only when you capture something.</td></tr>
+        <tr><td style="padding:6px 0;vertical-align:top;border-top:1px solid var(--line)"><strong>Microsoft OneDrive</strong><br><span style="color:var(--muted)">login.microsoftonline.com, graph.microsoft.com</span></td><td style="padding:6px 0;color:var(--muted);text-align:right;border-top:1px solid var(--line)">Syncs the catalogue between phones, only if you connect it above. What it stores is encrypted first.</td></tr>
+        <tr><td style="padding:6px 0;vertical-align:top;border-top:1px solid var(--line)"><strong>Open Library</strong><br><span style="color:var(--muted)">openlibrary.org</span></td><td style="padding:6px 0;color:var(--muted);text-align:right;border-top:1px solid var(--line)">Looks up author/year for anything identified as a book. No account, runs automatically, fails silently if nothing matches.</td></tr>
+      </table>
     </div>
   </section>
 
@@ -989,9 +999,52 @@ const SCHEMA=`{
  "approx_size_cm": "longest dimension estimate, number only",
  "visible_text": "any text, brand, model number or title legible in the photo, verbatim; empty string if none",
  "condition": "one of: new, good, worn, damaged, unknown",
+ "rarity_notes": "anything visible worth a second look - first-edition mark, signature, price-clipped or missing dust jacket, unusual mint mark or date, printer's key, maker's mark, or similar; empty string if nothing noticeable",
  "tags": ["3 to 6 lowercase search keywords"],
  "confidence": 0.0
 }`;
+
+/* ---------------- book lookup (Open Library) ----------------
+ * Runs automatically after identification when category is "book" -
+ * additive, never overwrites Claude's own fields. Open Library's data is
+ * not always reliable (a real ISBN looked up during testing returned a
+ * completely mismatched, seemingly self-published record) - so this is
+ * shown to the user as supplementary info to sanity-check, not trusted
+ * blindly or merged into the primary title/category fields. No API key,
+ * confirmed working with real calls from this deployment's origin. */
+async function lookupBookByTitle(title, author){
+  try{
+    const params=new URLSearchParams({title, limit:'1'});
+    if(author) params.set('author', author);
+    const r=await fetch('https://openlibrary.org/search.json?'+params);
+    if(!r.ok) return null;
+    const doc=(await r.json()).docs?.[0];
+    if(!doc) return null;
+    return {
+      title:doc.title||null,
+      author:doc.author_name?.[0]||null,
+      year:doc.first_publish_year||null,
+      isbn:doc.isbn?.[0]||null,
+      cover:doc.cover_i? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
+      editionCount:doc.edition_count??null
+    };
+  }catch(e){ return null; }
+}
+async function lookupBookByIsbn(isbn){
+  try{
+    const r=await fetch('https://openlibrary.org/api/books?bibkeys=ISBN:'+encodeURIComponent(isbn)+'&format=json&jscmd=data');
+    if(!r.ok) return null;
+    const rec=(await r.json())['ISBN:'+isbn];
+    if(!rec) return null;
+    return {
+      title:rec.title||null,
+      author:rec.authors?.[0]?.name||null,
+      year:rec.publish_date||null,
+      isbn,
+      cover:rec.cover?.medium||null
+    };
+  }catch(e){ return null; }
+}
 
 async function classify(id){
   const item=await get('items',id);
@@ -1023,7 +1076,9 @@ async function classify(id){
     const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
     const clean=text.replace(/```json|```/g,'').trim();
     const o=JSON.parse(clean);
-    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now()});
+    let book=null;
+    if(o.category==='book') book=await lookupBookByTitle(o.title, null);
+    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book});
     await touchBox(item.box);
     if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
     renderQueue();
@@ -1037,6 +1092,11 @@ async function classify(id){
 function hay(i){
   return [i.title,i.category,i.material,i.colour,i.visible_text,i.condition,(i.tags||[]).join(' '),i.box]
     .join(' ').toLowerCase();
+}
+function worthLook(i){
+  if(i.rarity_notes) return i.rarity_notes;
+  if(i.book?.editionCount!=null && i.book.editionCount<=5) return 'uncommon edition on Open Library';
+  return null;
 }
 async function renderResults(){
   const q=$('q').value.trim().toLowerCase();
@@ -1057,6 +1117,8 @@ async function renderResults(){
     <div class="body">
       <h3>${esc(i.title)}</h3>
       ${i.visible_text?`<p>“${esc(i.visible_text)}”</p>`:''}
+      ${i.book?`<p>${esc(i.book.author||'Unknown author')}${i.book.year?' · '+i.book.year:''} <span style="color:var(--muted)">(Open Library)</span></p>`:''}
+      ${worthLook(i)?`<p style="color:var(--warn)">Worth a look: ${esc(worthLook(i))}</p>`:''}
       <div class="meta">
         <span class="chip" style="background:${boxChip[i.box]||'#F5C400'}">${esc(i.box)}</span>
         ${boxHouse[i.box]?`<span class="pill">${esc(boxHouse[i.box])}</span>`:''}
@@ -1064,15 +1126,58 @@ async function renderResults(){
         ${i.material?`<span class="pill">${esc(i.material)}</span>`:''}
         ${i.state!=='done'?'<span class="pill">not identified</span>':''}
       </div>
+      ${i.category==='book' && !i.book && i.state==='done'?`<button data-isbn="${i.id}" style="margin-top:8px">Photograph copyright page</button>`:''}
     </div>
     <button data-del="${i.id}" data-delbox="${esc(i.box)}" class="danger" aria-label="Delete">✕</button>
   </div></div>`).join('');
+  $('results').querySelectorAll('[data-isbn]').forEach(b=>b.onclick=()=>{ isbnTargetId=Number(b.dataset.isbn); $('isbnShot').click(); });
   $('results').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
     await del('items',Number(b.dataset.del)); await touchBox(b.dataset.delbox); renderResults(); toast('Deleted');
   });
 }
 $('q').oninput=renderResults;
 $('filterBox').onchange=renderResults;
+
+let isbnTargetId=null;
+$('isbnShot').onchange=async e=>{
+  const file=e.target.files[0]; e.target.value='';
+  const id=isbnTargetId; isbnTargetId=null;
+  if(!file || !id) return;
+  const item=await get('items', id);
+  if(!item) return;
+  toast('Reading ISBN…');
+  try{
+    const photo=await resize(file,1024,.85);
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'x-api-key':state.key,
+        'anthropic-version':'2023-06-01',
+        'content-type':'application/json',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({
+        model:state.model, max_tokens:50,
+        system:'Reply with only the ISBN-13 or ISBN-10 digits visible (no dashes, no spaces, no other text), or the single word none if no ISBN is legible.',
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64(photo)}},
+          {type:'text',text:"Find the ISBN on this book's copyright page or barcode."}
+        ]}]
+      })
+    });
+    if(!r.ok){ const e2=await r.json().catch(()=>({})); throw new Error(e2.error?.message || ('API returned '+r.status)); }
+    const data=await r.json();
+    const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+    const isbn=text.trim().replace(/[^0-9Xx]/g,'');
+    if(!isbn || /none/i.test(text) || isbn.length<10){ toast('No ISBN found in that photo'); return; }
+    const book=await lookupBookByIsbn(isbn);
+    if(!book){ toast('No match for that ISBN on Open Library'); return; }
+    await put('items',{...item, book, updated:Date.now()});
+    await touchBox(item.box);
+    renderResults();
+    toast('Found: '+book.title);
+  }catch(err){ toast(err.message); }
+};
 
 /* ---------------- settings ---------------- */
 $('saveSettings').onclick=async()=>{
