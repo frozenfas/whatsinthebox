@@ -1,8 +1,12 @@
 # What's in the Box
 
 A storage register you run from your phone. Photograph an object as it goes
-into a box, and the app identifies it, files it against that box, and lets you
-search months later for where a thing ended up.
+into a storage location — a box, a shelf, a cupboard, whatever holds it — and
+the app identifies it, files it against that location, and lets you search
+months later for where a thing ended up. The app's own name is the one place
+"box" still literally means a box; everywhere in the UI it's a "location"
+(`LOCATION-0001` on the printed labels), on purpose, so it fits a shelf or a
+cupboard just as well.
 
 Six static files. No server, no build step, no framework.
 
@@ -62,15 +66,17 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
    install PWAs. Android: Chrome will offer to install it directly.
 3. Setup tab: paste an Anthropic API key from console.anthropic.com and save.
    Set a monthly spend limit in the Console while you are there.
-4. Boxes tab: pick or create the **house** you're packing at (top of the
-   tab) — a box always belongs to whichever house is selected there. Then
-   create a box, pick a colour, print its label, tape it on. The "copies
-   per label" choice controls how many identical copies print on one
-   sheet — enough to tape on more than one side of the box — sized to use
-   the page well whether you pick 2, 4, or 6 per sheet.
-5. Capture tab: one object per photo as it goes in — only boxes at the
-   currently-selected house show up here, since you can't be physically
-   packing into a box at the other one.
+4. Locations tab: pick or create the **house** you're packing at (top of
+   the tab) — a location always belongs to whichever house is selected
+   there. Then create a location (a box, a shelf, a cupboard — whatever
+   it actually is), pick a colour, print its label, tape it on. The
+   "copies per label" choice controls how many identical copies print on
+   one sheet — enough to tape on more than one side, or more than one
+   shelf edge — sized to use the page well whether you pick 2, 4, or 6
+   per sheet.
+5. Capture tab: one object per photo as it goes in — only locations at
+   the currently-selected house show up here, since you can't be
+   physically standing at the other one.
 6. Find tab: search by name, material, or text printed on the object —
    this searches across *every* house, each result labelled which one
    it's in.

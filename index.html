@@ -229,11 +229,11 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
   <!-- ===== CAPTURE ===== -->
   <section id="v-capture" class="view active">
     <div class="card">
-      <div class="eyebrow" style="margin-bottom:8px">Packing into</div>
-      <select id="boxPick" aria-label="Box being packed"></select>
+      <div class="eyebrow" style="margin-bottom:8px">Storing in</div>
+      <select id="boxPick" aria-label="Location being used"></select>
       <div class="btnrow" style="margin-top:10px">
-        <button id="newBoxQuick">New box</button>
-        <button id="sealBox">Seal box</button>
+        <button id="newBoxQuick">New location</button>
+        <button id="sealBox">Lock location</button>
       </div>
     </div>
 
@@ -266,7 +266,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
       </div>
     </div>
     <div class="card">
-      <div class="eyebrow" style="margin-bottom:8px">Add a box</div>
+      <div class="eyebrow" style="margin-bottom:8px">Add a location</div>
       <label class="field"><span>What is it, and where does it live?</span>
         <input type="text" id="boxName" placeholder="Kitchen, top of hall cupboard"></label>
       <div class="eyebrow" style="margin-bottom:8px">Colour</div>
@@ -288,7 +288,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
   <section id="v-search" class="view">
     <input type="text" id="q" placeholder="Search objects, materials, text on labels" autocomplete="off" enterkeyhint="search">
     <div class="btnrow" style="margin:10px 0 14px">
-      <select id="filterBox" style="flex:1" aria-label="Filter by box"></select>
+      <select id="filterBox" style="flex:1" aria-label="Filter by location"></select>
     </div>
     <div id="results"></div>
     <input type="file" id="isbnShot" accept="image/*" capture="environment" style="display:none">
@@ -298,7 +298,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
   <section id="v-settings" class="view">
     <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">About you</div>
-      <label class="field"><span>Your name, so boxes show who packed them</span>
+      <label class="field"><span>Your name, so locations show who packed them</span>
         <input type="text" id="enteredBy" placeholder="Your name" autocomplete="off"></label>
       <button class="primary" id="saveEnteredBy" style="width:100%">Save</button>
     </div>
@@ -356,7 +356,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
     Capture</button>
   <button data-go="boxes">
     <svg viewBox="0 0 24 24"><path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5L12 12l9-4.5M12 12v9"/></svg>
-    Boxes</button>
+    Locations</button>
   <button data-go="search">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
     Find</button>
@@ -788,9 +788,10 @@ let state={box:null, key:'', model:'claude-haiku-4-5-20251001', house:null, copi
 let pickedChip=PALETTE[0];
 function pickNewBoxChip(c){ pickedChip=c; renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip); }
 
+const CODE_PREFIX='LOCATION-';
 function nextCode(boxes){
-  const n=boxes.reduce((m,b)=>Math.max(m,parseInt(b.code.slice(4),10)||0),0)+1;
-  return 'BOX-'+String(n).padStart(3,'0');
+  const n=boxes.reduce((m,b)=>Math.max(m,parseInt(b.code.slice(CODE_PREFIX.length),10)||0),0)+1;
+  return CODE_PREFIX+String(n).padStart(4,'0');
 }
 async function touchBox(code){
   const b=await get('boxes',code);
@@ -842,8 +843,8 @@ $('renameHouse').onclick=async()=>{
 async function refreshBoxSelects(){
   const allBoxes=(await getAll('boxes')).sort((a,b)=>a.code<b.code?1:-1);
   const boxesHere=allBoxes.filter(b=>b.house===state.house);
-  const opt=b=>`<option value="${b.code}">${esc(b.code)}${b.name?'  '+esc(b.name):''}${b.sealed?' (sealed)':''}</option>`;
-  $('boxPick').innerHTML = boxesHere.length? boxesHere.map(opt).join('') : '<option value="">No boxes yet</option>';
+  const opt=b=>`<option value="${b.code}">${esc(b.code)}${b.name?'  '+esc(b.name):''}${b.sealed?' (locked)':''}</option>`;
+  $('boxPick').innerHTML = boxesHere.length? boxesHere.map(opt).join('') : '<option value="">No locations yet</option>';
   if(state.box && boxesHere.some(b=>b.code===state.box)) $('boxPick').value=state.box;
   else if(boxesHere.length){ state.box=boxesHere[0].code; $('boxPick').value=state.box; }
   else state.box=null;
@@ -853,7 +854,7 @@ async function refreshBoxSelects(){
     const inHouse=allBoxes.filter(b=>b.house===h.id);
     return inHouse.length? `<optgroup label="${esc(h.name||'Unnamed house')}">${inHouse.map(opt).join('')}</optgroup>` : '';
   }).join('');
-  $('filterBox').innerHTML='<option value="">Every box</option>'+groups;
+  $('filterBox').innerHTML='<option value="">Every location</option>'+groups;
   const cur=boxesHere.find(b=>b.code===state.box);
   $('ctxBox').innerHTML = cur? `<span class="chip" style="background:${cur.chip||'#F5C400'}">${esc(cur.code)}</span>` : '';
 }
@@ -863,13 +864,13 @@ $('addBox').onclick=async()=>{ await createBox($('boxName').value.trim(),pickedC
 $('sealBox').onclick=async()=>{
   if(!state.box) return toast('No box selected');
   const b=await get('boxes',state.box); b.sealed=Date.now(); b.updated=Date.now(); await put('boxes',b);
-  await refreshBoxSelects(); toast(b.code+' sealed');
+  await refreshBoxSelects(); toast(b.code+' locked');
 };
 
 async function renderBoxes(){
   const boxes=(await getAll('boxes')).filter(b=>b.house===state.house).sort((a,b)=>a.code<b.code?1:-1);
   const items=await getAll('items');
-  if(!boxes.length){ $('boxList').innerHTML=`<div class="empty"><strong>No boxes yet</strong>Create one, print its label, then start photographing what goes in.</div>`; return; }
+  if(!boxes.length){ $('boxList').innerHTML=`<div class="empty"><strong>No locations yet</strong>Create one, print its label, then start photographing what goes in.</div>`; return; }
   $('boxList').innerHTML=boxes.map(b=>{
     const n=items.filter(i=>i.box===b.code).length;
     return `<div class="card">
@@ -877,7 +878,7 @@ async function renderBoxes(){
         <div><span class="chip" style="background:${b.chip||'#F5C400'}">${esc(b.code)}</span>
           <div style="margin-top:7px;font-weight:600">${esc(b.name||'Unlabelled')}</div>
           <div class="meta"><span class="pill">${n} object${n===1?'':'s'}</span>
-          ${b.sealed?'<span class="pill">sealed</span>':''}
+          ${b.sealed?'<span class="pill">locked</span>':''}
           ${b.enteredBy?`<span class="pill">packed by ${esc(b.enteredBy)}</span>`:''}</div>
           <div class="swatches" data-recolour="${esc(b.code)}" style="margin-top:8px"></div></div>
         <div class="btnrow" style="flex-direction:column">
@@ -910,7 +911,7 @@ function labelHtml(b){
       <span class="qr">${qrSvg(b.code)}</span>
       <div class="code">${esc(b.code)}</div>
       ${b.name?`<div class="name">${esc(b.name)}</div>`:''}
-      <div class="line">PACKED __________</div>
+      <div class="line">DATE __________</div>
     </div>
   </div>`;
 }
