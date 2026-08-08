@@ -258,6 +258,14 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
   <!-- ===== BOXES ===== -->
   <section id="v-boxes" class="view">
     <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">House</div>
+      <select id="housePick" aria-label="Current house"></select>
+      <div class="btnrow" style="margin-top:10px">
+        <button id="newHouse">New house</button>
+        <button id="renameHouse">Rename</button>
+      </div>
+    </div>
+    <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">Add a box</div>
       <label class="field"><span>What is it, and where does it live?</span>
         <input type="text" id="boxName" placeholder="Kitchen, top of hall cupboard"></label>
@@ -288,10 +296,10 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
   <!-- ===== SETTINGS ===== -->
   <section id="v-settings" class="view">
     <div class="card">
-      <div class="eyebrow" style="margin-bottom:8px">Household</div>
-      <label class="field"><span>What to call this house</span>
-        <input type="text" id="houseName" placeholder="Our place"></label>
-      <button class="primary" id="saveHouse" style="width:100%">Save</button>
+      <div class="eyebrow" style="margin-bottom:8px">About you</div>
+      <label class="field"><span>Your name, so boxes show who packed them</span>
+        <input type="text" id="enteredBy" placeholder="Your name" autocomplete="off"></label>
+      <button class="primary" id="saveEnteredBy" style="width:100%">Save</button>
     </div>
     <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">Sync between phones</div>
@@ -318,8 +326,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
     </div>
     <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">Your data</div>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5">
-        Everything lives in this browser. Export before clearing Safari data, changing phone, or trusting it with anything you cannot photograph twice.</p>
+      <p id="exportNote" style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5"></p>
       <div class="btnrow">
         <button id="exportJson">Export catalogue</button>
         <button id="exportPhotos">Export photos</button>
@@ -362,7 +369,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
  * ones after its current version. Never remove or rename a field in
  * place; add the new one, migrate data across with a cursor, and
  * leave the old field alone if anything might still read it. */
-const DB_NAME='whatsinthebox', DB_VER=3;
+const DB_NAME='whatsinthebox', DB_VER=4;
 let db;
 
 // Walks every record in `store`, letting `fn` mutate each one in place,
@@ -444,6 +451,26 @@ function openDB(){
           await walkCursor(t.objectStore('items'), it=>{
             if(it.updated==null) it.updated=it.created||Date.now();
             if(!it.uid) it.uid=crypto.randomUUID();
+          });
+        }
+
+        if(from<4){
+          // Houses now sync too (two real physical locations, not one
+          // household), so they need the same cross-device `uid` items
+          // got in v3, plus `updated` for last-write-wins on rename.
+          await walkCursor(t.objectStore('houses'), h=>{
+            if(h.updated==null) h.updated=h.created||Date.now();
+            if(!h.uid) h.uid=crypto.randomUUID();
+          });
+          // Boxes get a uid too, separate from their human-readable
+          // `code`. Two phones creating boxes independently (now a real
+          // scenario, not a hypothetical, once there are two active
+          // houses) can and do generate the same code - `code` stays the
+          // local-storage key and the printed label, but sync addresses
+          // boxes by uid so two different boxes that happen to share a
+          // code can never overwrite each other's file.
+          await walkCursor(t.objectStore('boxes'), b=>{
+            if(!b.uid) b.uid=crypto.randomUUID();
           });
         }
       })();
@@ -614,19 +641,59 @@ async function ensureSyncKey(passphrase){
   else{ saltBytes=crypto.getRandomValues(new Uint8Array(16)); await putFile('salt.txt', bytesToB64(saltBytes)); }
   syncKey=await deriveSyncKey(passphrase, saltBytes);
 }
-async function pushBox(code){
-  const box=await get('boxes',code);
-  if(!box) return;
-  const items=(await getAll('items')).filter(i=>i.box===code);
-  const payload=await encryptJson({box:{...box, house:undefined}, items});
-  await putFile(code+'.box.json', payload);
+// Houses sync as a small shared list (houses.json), merged by uid with
+// last-write-wins on rename - simpler than the per-box file scheme since
+// there are only ever a couple of them. Returns a uid -> local house id
+// map so pushBox/mergeRemoteBox can translate between "which house" as
+// synced (uid, stable across devices) and "which house" as stored
+// locally (autoIncrement id, NOT stable - the whole reason this
+// translation step exists at all).
+async function syncHouses(){
+  const localHouses=await getAll('houses');
+  let remoteHouses=[];
+  const raw=await getFile('houses.json');
+  if(raw){
+    try{ remoteHouses=await decryptJson(raw); }
+    catch(e){ throw new Error('Could not read houses.json - check the sync passphrase matches the other phone'); }
+  }
+  const byUid=new Map();
+  for(const h of remoteHouses) byUid.set(h.uid, {uid:h.uid, name:h.name, created:h.created, updated:h.updated});
+  for(const h of localHouses){
+    const r=byUid.get(h.uid);
+    if(!r || h.updated>=r.updated) byUid.set(h.uid, {uid:h.uid, name:h.name, created:h.created, updated:h.updated});
+  }
+  const localByUid=Object.fromEntries(localHouses.map(h=>[h.uid,h]));
+  const uidToLocalId={};
+  for(const merged of byUid.values()){
+    const existing=localByUid[merged.uid];
+    const record=existing? {...merged, id:existing.id} : {...merged};
+    uidToLocalId[merged.uid]=await put('houses', record);
+  }
+  await putFile('houses.json', await encryptJson([...byUid.values()]));
+  return uidToLocalId;
 }
-async function mergeRemoteBox(remote){
-  await put('boxes', {...remote.box, house:state.house});
+async function pushBox(box){
+  const house=await get('houses', box.house);
+  const items=(await getAll('items')).filter(i=>i.box===box.code);
+  const payload=await encryptJson({box:{...box, house:house?.uid??null}, items});
+  await putFile(box.uid+'.box.json', payload);
+}
+async function mergeRemoteBox(remote, uidToLocalId){
+  const localHouseId=(remote.box.house!=null ? uidToLocalId[remote.box.house] : null) ?? state.house;
+  let box={...remote.box, house:localHouseId};
+  const existingByCode=await get('boxes', box.code);
+  if(existingByCode && existingByCode.uid!==box.uid){
+    // Two different boxes (different uid) independently ended up with
+    // the same human code - keep both, give the incoming one a fresh
+    // local code rather than silently overwriting a box that, despite
+    // the matching code, isn't actually the same one.
+    box.code=nextCode(await getAll('boxes'));
+  }
+  await put('boxes', box);
   const localItems=await getAll('items');
   for(const it of remote.items){
     const existing=localItems.find(x=>x.uid===it.uid);
-    const copy={...it};
+    const copy={...it, box:box.code};
     if(existing) copy.id=existing.id; else delete copy.id;
     await put('items', copy);
   }
@@ -638,26 +705,32 @@ async function syncNow(){
   showSyncStatus('Syncing…');
   try{
     await ensureSyncKey(state.syncPassphrase);
+    const uidToLocalId=await syncHouses();
     const remoteNames=await listFiles();
-    const remoteBoxCodes=remoteNames.filter(n=>n.endsWith('.box.json')).map(n=>n.replace('.box.json',''));
-    const localCodes=(await getAll('boxes')).map(b=>b.code);
-    const allCodes=[...new Set([...remoteBoxCodes, ...localCodes])];
-    // Decrypt every remote box up front. Any failure here aborts before
-    // anything is pushed - a wrong passphrase must never overwrite the
-    // other phone's good data with something re-encrypted under the
-    // wrong key.
-    const decrypted={};
-    for(const code of remoteBoxCodes){
-      const raw=await getFile(code+'.box.json');
+    const remoteBoxFiles=remoteNames.filter(n=>n.endsWith('.box.json'));
+    // Decrypt every remote box up front, indexed by uid rather than
+    // filename or code - box files are named by uid specifically so two
+    // boxes that happen to share a human code can never collide on the
+    // filename. Any decrypt failure aborts before anything is pushed - a
+    // wrong passphrase must never overwrite the other phone's good data
+    // with something re-encrypted under the wrong key.
+    const remoteByUid={};
+    for(const name of remoteBoxFiles){
+      const raw=await getFile(name);
       if(!raw) continue;
-      try{ decrypted[code]=await decryptJson(raw); }
-      catch(e){ throw new Error('Could not read '+code+' - check the sync passphrase matches the other phone'); }
+      let remote;
+      try{ remote=await decryptJson(raw); }
+      catch(e){ throw new Error('Could not read a remote box - check the sync passphrase matches the other phone'); }
+      remoteByUid[remote.box.uid]=remote;
     }
-    for(const code of allCodes){
-      const local=await get('boxes', code);
-      const remote=decrypted[code];
-      if(remote && (!local || remote.box.updated>local.updated)) await mergeRemoteBox(remote);
-      else await pushBox(code);
+    const localBoxes=await getAll('boxes');
+    const localByUid=Object.fromEntries(localBoxes.map(b=>[b.uid,b]));
+    const allUids=[...new Set([...Object.keys(remoteByUid), ...Object.keys(localByUid)])];
+    for(const uid of allUids){
+      const local=localByUid[uid];
+      const remote=remoteByUid[uid];
+      if(remote && (!local || remote.box.updated>local.updated)) await mergeRemoteBox(remote, uidToLocalId);
+      else await pushBox(local);
     }
     await put('settings',{k:'lastSync',v:Date.now()});
     await refreshBoxSelects(); renderBoxes();
@@ -694,14 +767,14 @@ document.querySelectorAll('nav button').forEach(b=>{
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     $('v-'+b.dataset.go).classList.add('active');
     if(b.dataset.go==='search') renderResults();
-    if(b.dataset.go==='boxes') renderBoxes();
+    if(b.dataset.go==='boxes') { refreshHouseSelects(); renderBoxes(); }
     if(b.dataset.go==='settings') { showUsage(); showSyncStatus(); showPassphraseStatus(); }
     window.scrollTo(0,0);
   };
 });
 
 /* ---------------- boxes ---------------- */
-let state={box:null, key:'', model:'claude-haiku-4-5-20251001', house:null, copies:4};
+let state={box:null, key:'', model:'claude-haiku-4-5-20251001', house:null, copies:4, enteredBy:''};
 let pickedChip=PALETTE[0];
 function pickNewBoxChip(c){ pickedChip=c; renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip); }
 
@@ -715,22 +788,63 @@ async function touchBox(code){
 }
 async function createBox(name,chip){
   const boxes=await getAll('boxes');
-  const box={code:nextCode(boxes), name:name||'', created:Date.now(), updated:Date.now(), sealed:null,
-             house:state.house, chip:chip||PALETTE[0]};
+  const box={code:nextCode(boxes), uid:crypto.randomUUID(), name:name||'', created:Date.now(), updated:Date.now(), sealed:null,
+             house:state.house, chip:chip||PALETTE[0], enteredBy:state.enteredBy||''};
   await put('boxes',box);
   state.box=box.code; await put('settings',{k:'box',v:box.code});
   await refreshBoxSelects();
   toast(box.code+' created');
   return box;
 }
+async function refreshHouseSelects(){
+  const houses=(await getAll('houses')).sort((a,b)=>a.created-b.created);
+  $('housePick').innerHTML = houses.map(h=>`<option value="${h.id}">${esc(h.name||'Unnamed house')}</option>`).join('');
+  if(state.house && houses.some(h=>h.id===state.house)) $('housePick').value=state.house;
+  else if(houses.length){ state.house=houses[0].id; $('housePick').value=state.house; }
+  await put('settings',{k:'house',v:state.house});
+}
+$('housePick').onchange=async e=>{
+  state.house=Number(e.target.value);
+  await put('settings',{k:'house',v:state.house});
+  state.box=null;
+  await refreshBoxSelects(); renderBoxes();
+};
+$('newHouse').onclick=async()=>{
+  const name=prompt('Name this house (e.g. "Our home", "Her parents\' place")');
+  if(!name) return;
+  const id=await put('houses',{name:name.trim(), created:Date.now(), updated:Date.now(), uid:crypto.randomUUID()});
+  state.house=id;
+  await put('settings',{k:'house',v:state.house});
+  state.box=null;
+  await refreshHouseSelects(); await refreshBoxSelects(); renderBoxes();
+  toast('House created');
+};
+$('renameHouse').onclick=async()=>{
+  if(!state.house) return;
+  const house=await get('houses',state.house);
+  const name=prompt('Rename this house', house.name||'');
+  if(!name) return;
+  house.name=name.trim(); house.updated=Date.now();
+  await put('houses',house);
+  await refreshHouseSelects();
+  toast('Saved');
+};
 async function refreshBoxSelects(){
-  const boxes=(await getAll('boxes')).sort((a,b)=>a.code<b.code?1:-1);
+  const allBoxes=(await getAll('boxes')).sort((a,b)=>a.code<b.code?1:-1);
+  const boxesHere=allBoxes.filter(b=>b.house===state.house);
   const opt=b=>`<option value="${b.code}">${esc(b.code)}${b.name?'  '+esc(b.name):''}${b.sealed?' (sealed)':''}</option>`;
-  $('boxPick').innerHTML = boxes.length? boxes.map(opt).join('') : '<option value="">No boxes yet</option>';
-  if(state.box) $('boxPick').value=state.box;
-  else if(boxes.length){ state.box=boxes[0].code; $('boxPick').value=state.box; }
-  $('filterBox').innerHTML='<option value="">Every box</option>'+boxes.map(opt).join('');
-  const cur=boxes.find(b=>b.code===state.box);
+  $('boxPick').innerHTML = boxesHere.length? boxesHere.map(opt).join('') : '<option value="">No boxes yet</option>';
+  if(state.box && boxesHere.some(b=>b.code===state.box)) $('boxPick').value=state.box;
+  else if(boxesHere.length){ state.box=boxesHere[0].code; $('boxPick').value=state.box; }
+  else state.box=null;
+  if(state.box) await put('settings',{k:'box',v:state.box});
+  const houses=(await getAll('houses')).sort((a,b)=>a.created-b.created);
+  const groups=houses.map(h=>{
+    const inHouse=allBoxes.filter(b=>b.house===h.id);
+    return inHouse.length? `<optgroup label="${esc(h.name||'Unnamed house')}">${inHouse.map(opt).join('')}</optgroup>` : '';
+  }).join('');
+  $('filterBox').innerHTML='<option value="">Every box</option>'+groups;
+  const cur=boxesHere.find(b=>b.code===state.box);
   $('ctxBox').innerHTML = cur? `<span class="chip" style="background:${cur.chip||'#F5C400'}">${esc(cur.code)}</span>` : '';
 }
 $('boxPick').onchange=async e=>{ state.box=e.target.value; await put('settings',{k:'box',v:state.box}); refreshBoxSelects(); };
@@ -743,7 +857,7 @@ $('sealBox').onclick=async()=>{
 };
 
 async function renderBoxes(){
-  const boxes=(await getAll('boxes')).sort((a,b)=>a.code<b.code?1:-1);
+  const boxes=(await getAll('boxes')).filter(b=>b.house===state.house).sort((a,b)=>a.code<b.code?1:-1);
   const items=await getAll('items');
   if(!boxes.length){ $('boxList').innerHTML=`<div class="empty"><strong>No boxes yet</strong>Create one, print its label, then start photographing what goes in.</div>`; return; }
   $('boxList').innerHTML=boxes.map(b=>{
@@ -753,7 +867,8 @@ async function renderBoxes(){
         <div><span class="chip" style="background:${b.chip||'#F5C400'}">${esc(b.code)}</span>
           <div style="margin-top:7px;font-weight:600">${esc(b.name||'Unlabelled')}</div>
           <div class="meta"><span class="pill">${n} object${n===1?'':'s'}</span>
-          ${b.sealed?'<span class="pill">sealed</span>':''}</div>
+          ${b.sealed?'<span class="pill">sealed</span>':''}
+          ${b.enteredBy?`<span class="pill">packed by ${esc(b.enteredBy)}</span>`:''}</div>
           <div class="swatches" data-recolour="${esc(b.code)}" style="margin-top:8px"></div></div>
         <div class="btnrow" style="flex-direction:column">
           <button data-print="${b.code}">Label</button>
@@ -799,7 +914,7 @@ async function printLabels(codes){
   sheet.innerHTML=list.flatMap(b=>Array(copies).fill(b)).map(labelHtml).join('');
   setTimeout(()=>window.print(),120);
 }
-$('printAll').onclick=async()=>{ const b=await getAll('boxes'); printLabels(b.map(x=>x.code)); };
+$('printAll').onclick=async()=>{ const b=(await getAll('boxes')).filter(x=>x.house===state.house); printLabels(b.map(x=>x.code)); };
 $('copies').onchange=async e=>{ state.copies=Number(e.target.value); await put('settings',{k:'copies',v:state.copies}); };
 
 /* ---------------- capture ---------------- */
@@ -927,7 +1042,10 @@ async function renderResults(){
   const q=$('q').value.trim().toLowerCase();
   const boxf=$('filterBox').value;
   let items=(await getAll('items')).sort((a,b)=>b.created-a.created);
-  const boxChip=Object.fromEntries((await getAll('boxes')).map(b=>[b.code,b.chip]));
+  const boxes=await getAll('boxes');
+  const boxChip=Object.fromEntries(boxes.map(b=>[b.code,b.chip]));
+  const houseName=Object.fromEntries((await getAll('houses')).map(h=>[h.id,h.name]));
+  const boxHouse=Object.fromEntries(boxes.map(b=>[b.code,houseName[b.house]]));
   if(boxf) items=items.filter(i=>i.box===boxf);
   if(q){ const terms=q.split(/\s+/); items=items.filter(i=>{const h=hay(i);return terms.every(t=>h.includes(t))}); }
   if(!items.length){
@@ -941,6 +1059,7 @@ async function renderResults(){
       ${i.visible_text?`<p>“${esc(i.visible_text)}”</p>`:''}
       <div class="meta">
         <span class="chip" style="background:${boxChip[i.box]||'#F5C400'}">${esc(i.box)}</span>
+        ${boxHouse[i.box]?`<span class="pill">${esc(boxHouse[i.box])}</span>`:''}
         ${i.category?`<span class="pill">${esc(i.category)}</span>`:''}
         ${i.material?`<span class="pill">${esc(i.material)}</span>`:''}
         ${i.state!=='done'?'<span class="pill">not identified</span>':''}
@@ -962,11 +1081,9 @@ $('saveSettings').onclick=async()=>{
   await put('settings',{k:'model',v:state.model});
   toast('Saved');
 };
-$('saveHouse').onclick=async()=>{
-  const house=await get('houses',state.house);
-  house.name=$('houseName').value.trim();
-  await put('houses',house);
-  await refreshBoxSelects();
+$('saveEnteredBy').onclick=async()=>{
+  state.enteredBy=$('enteredBy').value.trim();
+  await put('settings',{k:'enteredBy',v:state.enteredBy});
   toast('Saved');
 };
 function showPassphraseStatus(){
@@ -999,6 +1116,9 @@ async function showSyncStatus(msg){
   const parts=[tokRow?'OneDrive connected':'OneDrive not connected'];
   if(lastRow?.v) parts.push('last synced '+new Date(lastRow.v).toLocaleString());
   $('syncStatus').textContent=parts.join(' · ');
+  $('exportNote').textContent = tokRow
+    ? 'Everything lives in this browser and syncs to OneDrive. Export isn\'t something to think about often with sync on - more an occasional extra copy, e.g. before a major phone change.'
+    : 'Everything lives in this browser. Export before clearing Safari data, changing phone, or trusting it with anything you cannot photograph twice.';
 }
 function download(name,blob){
   const a=document.createElement('a');
@@ -1039,13 +1159,15 @@ async function showUsage(){
   state.key=m.key||''; state.model=m.model||state.model; state.box=m.box||null;
   state.copies=m.copies||4;
   state.syncPassphrase=m.syncPassphrase||'';
+  state.enteredBy=m.enteredBy||'';
   const houses=await getAll('houses');
-  state.house=houses[0]?.id ?? null;
+  state.house=(m.house!=null && houses.some(h=>h.id===m.house)) ? m.house : (houses[0]?.id ?? null);
   $('apiKey').value=state.key; $('model').value=state.model;
   $('copies').value=state.copies;
-  $('houseName').value=houses[0]?.name||'';
+  $('enteredBy').value=state.enteredBy;
   $('syncPassphrase').value=state.syncPassphrase;
   renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip);
+  await refreshHouseSelects();
   await refreshBoxSelects(); renderQueue();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!state.key) toast('Add your API key under Setup');

@@ -57,12 +57,18 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
    install PWAs. Android: Chrome will offer to install it directly.
 3. Setup tab: paste an Anthropic API key from console.anthropic.com and save.
    Set a monthly spend limit in the Console while you are there.
-4. Boxes tab: create a box, pick a colour, print its label, tape it on. The
-   "copies per label" choice controls how many identical copies print on one
+4. Boxes tab: pick or create the **house** you're packing at (top of the
+   tab) — a box always belongs to whichever house is selected there. Then
+   create a box, pick a colour, print its label, tape it on. The "copies
+   per label" choice controls how many identical copies print on one
    sheet — enough to tape on more than one side of the box — sized to use
    the page well whether you pick 2, 4, or 6 per sheet.
-5. Capture tab: one object per photo as it goes in.
-6. Find tab: search by name, material, or text printed on the object.
+5. Capture tab: one object per photo as it goes in — only boxes at the
+   currently-selected house show up here, since you can't be physically
+   packing into a box at the other one.
+6. Find tab: search by name, material, or text printed on the object —
+   this searches across *every* house, each result labelled which one
+   it's in.
 
 ## Syncing two phones (OneDrive)
 
@@ -106,14 +112,9 @@ objects.
 
 - Data lives in this browser's IndexedDB. iOS can evict it after weeks of
   disuse. **Export from the Setup tab regularly** even with sync configured.
-- Sync doesn't propagate deletions yet (deleting an item on one phone can
-  have it reappear from the other phone's next sync), and if both phones
-  create a brand-new box before either has ever synced, they could
-  coincidentally pick the same box code. Both are documented, scoped
-  limitations in `CLAUDE.md`, not bugs waiting to be found.
-- Each install is one household ("house" in the data model), renamed under
-  Setup. The schema already supports more than one house per install; there
-  just isn't a switcher UI yet, since nobody's needed it.
+- Sync doesn't propagate deletions yet — deleting an item on one phone can
+  have it reappear from the other phone's next sync. Documented, scoped
+  limitation in `CLAUDE.md`, not a bug waiting to be found.
 - Labels print but are not scanned back in; you pick the box from a list.
 - Item fields are not editable after identification, only deletable.
 - Photos are stored as data URLs, about a third larger than raw blobs. This

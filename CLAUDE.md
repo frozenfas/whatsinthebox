@@ -2,8 +2,9 @@
 
 A phone-first inventory app. Photograph each object as it goes into a storage
 box, identify it with the Claude API, search later to find which box it is in.
-Personal project, one install per household. Target device is a phone browser
-(iOS Safari first, Android Chrome also supported for install/camera/PWA).
+Personal project, two people, two genuinely separate physical houses synced
+into one catalogue. Target device is a phone browser (iOS Safari first,
+Android Chrome also supported for install/camera/PWA).
 
 ## Hard constraints
 
@@ -33,7 +34,7 @@ Personal project, one install per household. Target device is a phone browser
 | No MSAL.js for OneDrive auth; hand-rolled OAuth2 Authorization Code + PKCE instead | MSAL's CDN build stopped at v2 - Microsoft's own docs say v3+ requires a package manager or bundler, which breaks the no-build-step rule. The hand-rolled flow is ~80 lines of `fetch` + Web Crypto, and keeps every byte of auth state in the `settings` IndexedDB store instead of needing `localStorage` for a token cache. |
 | Sync stores the passphrase, never uploads it; OneDrive only ever sees encrypted bytes | Privacy was the explicit priority when this was designed. A lost passphrase makes synced data permanently unrecoverable - that's the deliberate cost, not a bug. |
 | Both phones share one dedicated Microsoft account for sync, not two personal accounts | First built against two separate personal accounts, needing the broad `Files.ReadWrite` scope so the non-owner phone could reach a folder shared from the other's account. That scope reaches the *entire* OneDrive, including anything unrelated already stored there - reconsidered once that was fully understood. One dedicated account (`frozenfas.apps@outlook.com`), used for nothing else, lets the app request the narrow `Files.ReadWrite.AppFolder` scope instead. Traded a shared login for meaningfully less access. |
-| Houses are the top-level entity, above boxes | Two phones (iPhone + Android) already mean two isolated IndexedDBs with no sync. Houses give the eventual sync (OneDrive roadmap item) a natural partition, and let one install hold more than one household's boxes without redesigning the schema. No switcher UI yet — one house is created automatically, renamed under Setup. |
+| Houses are the top-level entity, above boxes, and are themselves synced | Not a hypothetical: the two people using this app pack at two genuinely different physical addresses. Houses sync as their own small list (`houses.json`, merged by `uid`), and every box carries the real house it belongs to through sync (via that `uid`, translated to each device's own local house id) rather than being force-reassigned to whatever house happens to exist locally. Chosen over keeping the two houses' catalogues fully separate: both are visible and searchable from either phone, clearly labelled which house each box is in — useful for "is this at ours or at hers?" A switcher on the Boxes tab creates/renames/selects the active house. |
 | `DB_VER` only ever increases; migrations are additive | The catalogue is the only copy of months of packing data on someone's phone. See "Data model versioning" below — this is the pattern every future schema change must follow. |
 
 ## Files
@@ -47,14 +48,14 @@ Personal project, one install per household. Target device is a phone browser
 ## Data model
 
 ```
-houses   { id, name, created }                              keyPath: id (auto)
-boxes    { code: "BOX-001", name, created, updated, sealed,  keyPath: code
-           house, chip }                                     index: house
-items    { id, uid, box, full, thumb, state, created,        keyPath: id (auto)
-           updated, title, category, material, colour,       indexes: box, state
+houses   { id, uid, name, created, updated }                 keyPath: id (auto)
+boxes    { code: "BOX-001", uid, name, created, updated,      keyPath: code
+           sealed, house, chip, enteredBy }                   index: house
+items    { id, uid, box, full, thumb, state, created,         keyPath: id (auto)
+           updated, title, category, material, colour,        indexes: box, state
            approx_size_cm, visible_text, condition,
            tags[], confidence }
-settings { k, v }                                            keyPath: k
+settings { k, v }                                              keyPath: k
 ```
 
 `state` is `pending` (awaiting identification), `working`, or `done`.
@@ -63,17 +64,23 @@ settings { k, v }                                            keyPath: k
 8-swatch `PALETTE` in `index.html`, used for the printed label's colour bar
 and the in-app chip — kept separate from `item.colour` (the object's own
 dominant colour, set by the vision model) even though the names are similar.
-Items don't carry `house` directly; they're scoped to a house through their
-box, so a box move never needs to touch its items.
+`box.enteredBy` is a free-text name, typed once per phone under Setup and
+stamped onto each box created there — no way to read an actual device name
+from a web page, so this is manual, not inferred. Items don't carry `house`
+directly; they're scoped to a house through their box, so moving a box
+between houses (not yet exposed in the UI) would only need one write.
 
-`updated` (on both boxes and items) and `item.uid` exist for sync, not for
-the UI. `updated` decides which side wins when two phones both have a copy
-of the same box - see Sync below. `uid` (`crypto.randomUUID()`) is what
-sync matches items on across devices, because `id` is a per-device
-auto-increment integer that two phones will happily generate the same
-value for independently. Every code path that changes an item must call
-`touchBox(item.box)` afterwards so the *box's* `updated` reflects the
-change - sync only looks at the box's timestamp, not each item's.
+`updated` (on houses, boxes, and items) and `uid` (on houses, boxes, and
+items) exist for sync, not the UI. `updated` decides which side wins when
+two phones both have a copy of the same record. `uid` (`crypto.randomUUID()`)
+is the identity sync actually matches on, because every store's local `id`
+(or `code`, for boxes) is generated per-device and two phones will happily
+produce the same one independently - `code` stays the human-readable label
+and local primary key; `uid` is invisible to the user and is what the
+OneDrive filename and cross-device matching are actually built on. Every
+code path that changes an item must call `touchBox(item.box)` afterwards so
+the *box's* `updated` reflects the change - sync only looks at the box's
+timestamp, not each item's.
 
 ## Data model versioning
 
@@ -100,7 +107,34 @@ This is the only way schema changes are safe to ship: nobody can run a
 migration script against a phone that's face-down in a box in someone's
 loft. The upgrade has to run itself, the next time the app happens to open.
 
+**One `walkCursor` pass per store, ever, per upgrade.** If two different
+version blocks both need to touch e.g. `boxes`, do it as one combined
+`walkCursor(t.objectStore('boxes'), b => { if(from<2){...} if(from<4){...} })`
+covering everything relevant, not two separate calls in two separate
+blocks. Two independent cursor passes over the same store within one
+upgrade transaction race and the second one silently loses the first
+one's writes - this actually happened (see the `from<2`/`from<4` box
+block in `index.html` for the surviving pattern), was caught by testing a
+real migration rather than assuming it worked, and cost real debugging
+time to track down. Don't reintroduce it.
+
 ## Sync (OneDrive)
+
+Three things sync, each its own file(s) in the app's OneDrive folder:
+`salt.txt` (unencrypted, bootstraps the shared encryption key),
+`houses.json` (one small encrypted file, every house, merged by `uid` with
+last-write-wins on rename), and one `{box.uid}.box.json` per box (box
+fields plus its items, photos included). Box files are named by `uid`,
+not the human `code` - two boxes independently created with the same code
+(a real, tested scenario, not hypothetical, now that there are two people
+actively packing at two different houses) get two different files and
+never overwrite each other. If a box arrives from sync with a code that
+collides with a *different* local box (different `uid`, same `code`), the
+incoming one gets renamed to the next free code on this device rather
+than silently overwriting the box that happened to share it - see
+`mergeRemoteBox()`. `syncHouses()` runs before the box loop each sync, so
+the box loop always has an up-to-date `uid -> local house id` map to
+resolve each box's real house through, rather than guessing.
 
 Both phones sign into **the same dedicated Microsoft account**
 (`frozenfas.apps@outlook.com`), not two separate personal accounts. That
@@ -152,12 +186,6 @@ push-then-pull cycle was tested against a mocked Graph API using the
   remote item list as authoritative) risks real data loss. The cost:
   delete an item on one phone, and it can reappear from the other phone's
   next push until real tombstones are built.
-- **Box codes can theoretically collide.** `nextCode()` only looks at
-  boxes already known to *this* device. If both phones create a new box
-  before either has synced even once, they could pick the same code, and
-  the later sync silently lets one overwrite the other. Narrow window in
-  practice (sync before a fresh install starts creating boxes), but real -
-  a merge-time collision detector would close it properly.
 - **Whole-box last-write-wins, not per-field merge.** If both phones edit
   the *same* box while both are offline, the newer `updated` wins entirely;
   the older edit is just gone. Fine for how this app is actually used
@@ -195,8 +223,9 @@ the install prompt works without any certificate.
 
 1. Live-test OneDrive sync on both phones (see Sync above) - it's built
    and configured, just not yet tried with a real login on a real device.
-   After that: proper deletion tombstones and box-code collision
-   handling, the two known gaps called out above.
+   After that: proper deletion tombstones, the remaining known gap called
+   out above (box-code collisions were found and fixed during this build,
+   not left open).
 2. Scan a printed label to jump to that box's contents. Needs jsQR, since
    Safari has no `BarcodeDetector`.
 3. Edit an item's fields after identification. Currently delete-only.
