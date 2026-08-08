@@ -2,7 +2,8 @@
 
 A phone-first inventory app. Photograph each object as it goes into a storage
 box, identify it with the Claude API, search later to find which box it is in.
-Single user, personal project. Target device is an iPhone in Safari.
+Personal project, one install per household. Target device is a phone browser
+(iOS Safari first, Android Chrome also supported for install/camera/PWA).
 
 ## Hard constraints
 
@@ -29,6 +30,8 @@ Single user, personal project. Target device is an iPhone in Safari.
 | Location lives on the box, not the item | Moving a box relocates all its contents with one write. |
 | No local classifier or embedding model | Structured JSON from the vision model plus substring search is enough at this scale. Revisit above ~2000 items. |
 | iCloud rejected for sync | No usable API for a web app. CloudKit JS needs a developer container. OneDrive via Microsoft Graph is the intended path. |
+| Houses are the top-level entity, above boxes | Two phones (iPhone + Android) already mean two isolated IndexedDBs with no sync. Houses give the eventual sync (OneDrive roadmap item) a natural partition, and let one install hold more than one household's boxes without redesigning the schema. No switcher UI yet — one house is created automatically, renamed under Setup. |
+| `DB_VER` only ever increases; migrations are additive | The catalogue is the only copy of months of packing data on someone's phone. See "Data model versioning" below — this is the pattern every future schema change must follow. |
 
 ## Files
 
@@ -41,16 +44,49 @@ Single user, personal project. Target device is an iPhone in Safari.
 ## Data model
 
 ```
-boxes    { code: "BOX-001", name, created, sealed }        keyPath: code
-items    { id, box, full, thumb, state, created,           keyPath: id (auto)
-           title, category, material, colour,
+houses   { id, name, created }                              keyPath: id (auto)
+boxes    { code: "BOX-001", name, created, sealed,          keyPath: code
+           house, chip }                                    index: house
+items    { id, box, full, thumb, state, created,            keyPath: id (auto)
+           title, category, material, colour,               indexes: box, state
            approx_size_cm, visible_text, condition,
            tags[], confidence }
-settings { k, v }                                          keyPath: k
+settings { k, v }                                            keyPath: k
 ```
 
 `state` is `pending` (awaiting identification), `working`, or `done`.
 `full` and `thumb` are JPEG data URLs at 1024 px and 320 px.
+`box.house` points at a `houses.id`. `box.chip` is a hex colour from the
+8-swatch `PALETTE` in `index.html`, used for the printed label's colour bar
+and the in-app chip — kept separate from `item.colour` (the object's own
+dominant colour, set by the vision model) even though the names are similar.
+Items don't carry `house` directly; they're scoped to a house through their
+box, so a box move never needs to touch its items.
+
+## Data model versioning
+
+`DB_VER` in `index.html` only ever goes up, and `openDB()`'s
+`onupgradeneeded` is a stack of `if (from < N)` blocks, one per version, run
+in order for whatever range the browser's stored version falls into. A
+brand-new install runs every block; an existing phone only runs the ones
+after its current version.
+
+When a change needs a new store, index, or field:
+1. Bump `DB_VER` by one.
+2. Add one more `if (from < DB_VER) { ... }` block. Never edit a block that
+   has already shipped — someone's phone may already be sitting at that
+   version.
+3. If existing records need the new field, backfill them with a cursor
+   inside that same block (see the `from<2` block for the pattern) rather
+   than leaving them `undefined` for the rest of the app to guard against.
+4. Never remove or rename a field in place. Add the new one; leave the old
+   one alone if anything might still read it.
+5. Bump the `CACHE` constant in `sw.js` too, so installed phones actually
+   fetch the new `index.html` instead of serving the cached shell forever.
+
+This is the only way schema changes are safe to ship: nobody can run a
+migration script against a phone that's face-down in a box in someone's
+loft. The upgrade has to run itself, the next time the app happens to open.
 
 ## Running it
 
@@ -69,14 +105,45 @@ the install prompt works without any certificate.
   what happened and what to do. Buttons name the action they perform.
 - Design tokens are the CSS variables at the top of `index.html`. The yellow
   chip is the one loud element; everything else stays greyscale plus one blue.
+- The brand mark (`LOGO_SVG` in `index.html`) is an isometric open crate with
+  a small yellow tag on its corner — reused as-is for the header, the home
+  screen icons (`icon-192.png`, `icon-512.png`), and the printed label.
+  Regenerate the PNGs from the same SVG if it ever changes, so all three
+  stay in sync; don't hand-edit the PNGs.
+- Box colours (`PALETTE` in `index.html`) are a fixed 8-swatch set, not a
+  free colour picker — keeps every box's colour visually distinct at a
+  glance across a shelf, and keeps the printed label's colour bar readable
+  at a small physical size.
 
 ## Roadmap, in order
 
 1. OneDrive sync via Microsoft Graph and MSAL.js. One JSON per box plus photos
-   as separate files. Never sync a live SQLite-style single file.
+   as separate files. Never sync a live SQLite-style single file. Syncs one
+   house at a time, now that houses exist as the top-level entity.
 2. Scan a printed label to jump to that box's contents. Needs jsQR, since
    Safari has no `BarcodeDetector`.
 3. Edit an item's fields after identification. Currently delete-only.
-4. Store photos as Blobs rather than data URLs, about 33% space saving.
+4. Store photos as Blobs rather than data URLs, about 33% space saving and
+   much cheaper to list/search since `getAll('items')` stops dragging full
+   photo bytes through memory for every row. **Priority note:** the stated
+   target is thousands of boxes and 1M+ photos. IndexedDB itself (already in
+   use, not a flat JSON file) handles thousands of *records* fine, but a
+   million photos' worth of bytes sitting in browser storage is a real wall
+   — quota limits, iOS eviction, and this item's cost all get worse well
+   before that scale. Do this before item count gets much past a few
+   thousand, not after. Past that, the honest ceiling for a no-server
+   browser PWA is reached; the documented native Swift + CloudKit path
+   (see Background in README) is what actually scales to a million photos,
+   because it gets real sync and storage outside the browser sandbox.
 5. Category-specific enrichment behind one resolver interface: books via
-   OpenLibrary, coins via Numista.
+   OpenLibrary, coins via Numista, stamps and other catalogued collectibles
+   via similar structured lookups where a free/affordable API exists —
+   including flagging items that look valuable or rare (e.g. a coin or
+   stamp the API marks as a scarce date/variant) rather than just filling
+   in fields. Paintings, sculpture, and furniture don't have an equivalent
+   of an ISBN or catalogue number to look up, and no affordable structured
+   database of maker's marks or auction records exists to query. For that
+   category the realistic scope is not automated identification — it's
+   flagging the item (e.g. low classifier confidence, or a visible
+   signature/mark worth a closer look) so the human decides whether it's
+   worth a real appraisal, not this app guessing at attribution or value.

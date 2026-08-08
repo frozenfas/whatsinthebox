@@ -46,7 +46,9 @@ header{
   border-bottom:1px solid var(--line);
   padding:14px 16px 12px;
 }
-header .row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+header .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brandmark{width:26px;height:26px;flex:0 0 auto;color:var(--ink)}
+.brandmark svg{width:100%;height:100%;display:block}
 main{padding:16px;max-width:720px;margin:0 auto}
 .view{display:none}
 .view.active{display:block}
@@ -127,6 +129,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{
 .empty{text-align:center;color:var(--muted);padding:44px 20px;font-size:14px;line-height:1.6}
 .empty strong{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
 
+/* box colour */
+.swatches{display:flex;gap:8px;flex-wrap:wrap}
+.dot{width:24px;height:24px;border-radius:50%;border:2px solid transparent;padding:0;cursor:pointer;flex:0 0 auto}
+.dot.sel{border-color:var(--ink)}
+
 /* nav */
 nav{
   position:fixed;left:0;right:0;bottom:0;z-index:30;
@@ -157,28 +164,61 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
 /* print sheet */
 #sheet{display:none}
 .label{
-  border:1px dashed #999;border-radius:6px;padding:10px;
-  display:flex;gap:10px;align-items:center;break-inside:avoid;
+  display:flex;overflow:hidden;box-sizing:border-box;break-inside:avoid;
 }
-.label svg{width:74px;height:74px;flex:0 0 auto}
-.label .code{font-family:var(--mono);font-weight:700;font-size:17px;letter-spacing:.06em}
-.label .name{font-size:12px;color:#333;margin-top:2px}
-.label .line{margin-top:7px;border-top:1px solid #bbb;font-size:9px;color:#777;padding-top:2px;font-family:var(--mono)}
+.label .bar{width:16%;flex:0 0 auto;background:var(--chip,#D2D8DF)}
+.label .body{
+  flex:1;min-width:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:6px;
+  padding:6% 4%;text-align:center;
+}
+.label .logo-mark{color:#111}
+.label .logo-mark svg{width:100%;display:block}
+.label .qr svg{width:100%;height:auto;display:block}
+.label .code{font-family:var(--mono);font-weight:700;letter-spacing:.05em;background:#F5C400;color:#000;border-radius:3px;padding:3px 8px}
+.label .name{color:#333}
+.label .line{border-top:1px solid #bbb;color:#777;padding-top:3px;font-family:var(--mono);width:90%}
 @media print{
   body{background:#fff;padding:0}
   header,nav,main,.status{display:none!important}
-  #sheet{display:grid!important;grid-template-columns:1fr 1fr;gap:8mm;padding:8mm}
-  .label{border-color:#bbb}
+  #sheet{display:grid!important;padding:8mm}
+  @page{size:portrait}
 }
+/* One dotted line per cut, shared between neighbours rather than a
+   frame round each label - simplest way to show where the scissors go. */
+#sheet.copies-2{grid-template-columns:1fr;grid-auto-rows:136mm}
+#sheet.copies-2 .label{border-bottom:1.5px dotted #999}
+#sheet.copies-2 .logo-mark{width:18mm}
+#sheet.copies-2 .qr{width:46mm}
+#sheet.copies-2 .code{font-size:26px}
+#sheet.copies-2 .name{font-size:14px}
+#sheet.copies-2 .line{font-size:11px}
+#sheet.copies-4{grid-template-columns:1fr 1fr;grid-auto-rows:136mm}
+#sheet.copies-4 .label{border-right:1.5px dotted #999;border-bottom:1.5px dotted #999}
+#sheet.copies-4 .logo-mark{width:18mm}
+#sheet.copies-4 .qr{width:44mm}
+#sheet.copies-4 .code{font-size:16px}
+#sheet.copies-4 .name{font-size:11px}
+#sheet.copies-4 .line{font-size:9px}
+#sheet.copies-6{grid-template-columns:1fr 1fr;grid-auto-rows:88mm}
+#sheet.copies-6 .label{border-right:1.5px dotted #999;border-bottom:1.5px dotted #999}
+#sheet.copies-6 .logo-mark{width:11mm}
+#sheet.copies-6 .qr{width:28mm}
+#sheet.copies-6 .code{font-size:13px}
+#sheet.copies-6 .name{font-size:9px}
+#sheet.copies-6 .line{font-size:8px}
 </style>
 </head>
 <body>
 
 <header>
   <div class="row">
-    <div>
-      <div class="eyebrow">Storage register</div>
-      <h1 style="font-size:21px">What's in the box</h1>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="brandmark" class="brandmark" aria-hidden="true"></span>
+      <div>
+        <div class="eyebrow">Storage register</div>
+        <h1 style="font-size:21px">What's in the box</h1>
+      </div>
     </div>
     <div id="ctxBox"></div>
   </div>
@@ -221,10 +261,17 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
       <div class="eyebrow" style="margin-bottom:8px">Add a box</div>
       <label class="field"><span>What is it, and where does it live?</span>
         <input type="text" id="boxName" placeholder="Kitchen, top of hall cupboard"></label>
+      <div class="eyebrow" style="margin-bottom:8px">Colour</div>
+      <div class="swatches" id="newBoxChips" aria-label="Box colour" style="margin-bottom:14px"></div>
       <button class="primary" id="addBox" style="width:100%">Create box</button>
     </div>
-    <div class="btnrow" style="margin-bottom:12px">
+    <div class="btnrow" style="margin-bottom:12px;align-items:center">
       <button id="printAll">Print all labels</button>
+      <select id="copies" aria-label="Copies per label" style="flex:1">
+        <option value="2">2 per page, large</option>
+        <option value="4">4 per page</option>
+        <option value="6">6 per page, compact</option>
+      </select>
     </div>
     <div id="boxList"></div>
   </section>
@@ -240,6 +287,12 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
 
   <!-- ===== SETTINGS ===== -->
   <section id="v-settings" class="view">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Household</div>
+      <label class="field"><span>What to call this house</span>
+        <input type="text" id="houseName" placeholder="Our place"></label>
+      <button class="primary" id="saveHouse" style="width:100%">Save</button>
+    </div>
     <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">Identification</div>
       <label class="field"><span>Anthropic API key. Stored on this phone only.</span>
@@ -288,8 +341,16 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
 
 <script src="qrcode.js"></script>
 <script>
-/* ---------------- storage ---------------- */
-const DB_NAME='whatsinthebox', DB_VER=1;
+/* ---------------- storage ----------------
+ * DB_VER only ever goes up. Each release that needs a schema or data
+ * change adds one more `if(from<N)` block below — never edit an old
+ * block once it has shipped. Blocks run in order for whatever range
+ * the browser's stored version falls into, so a brand-new install
+ * (from=0) runs every block, and an existing device only runs the
+ * ones after its current version. Never remove or rename a field in
+ * place; add the new one, migrate data across with a cursor, and
+ * leave the old field alone if anything might still read it. */
+const DB_NAME='whatsinthebox', DB_VER=2;
 let db;
 
 function openDB(){
@@ -297,12 +358,41 @@ function openDB(){
     const r=indexedDB.open(DB_NAME,DB_VER);
     r.onupgradeneeded=e=>{
       const d=e.target.result;
-      if(!d.objectStoreNames.contains('boxes')) d.createObjectStore('boxes',{keyPath:'code'});
-      if(!d.objectStoreNames.contains('items')){
-        const s=d.createObjectStore('items',{keyPath:'id',autoIncrement:true});
-        s.createIndex('box','box'); s.createIndex('state','state');
+      const t=e.target.transaction;
+      const from=e.oldVersion;
+
+      if(from<1){
+        if(!d.objectStoreNames.contains('boxes')) d.createObjectStore('boxes',{keyPath:'code'});
+        if(!d.objectStoreNames.contains('items')){
+          const s=d.createObjectStore('items',{keyPath:'id',autoIncrement:true});
+          s.createIndex('box','box'); s.createIndex('state','state');
+        }
+        if(!d.objectStoreNames.contains('settings')) d.createObjectStore('settings',{keyPath:'k'});
       }
-      if(!d.objectStoreNames.contains('settings')) d.createObjectStore('settings',{keyPath:'k'});
+
+      if(from<2){
+        // Houses become the top-level unit, so the same app can hold more
+        // than one household's boxes and (once sync exists) sync one house
+        // at a time. Existing boxes get filed under a new default house
+        // and given a tag colour, so nothing already packed loses its place.
+        const houses=d.createObjectStore('houses',{keyPath:'id',autoIncrement:true});
+        const boxStore=t.objectStore('boxes');
+        boxStore.createIndex('house','house');
+        const houseReq=houses.add({name:'My house',created:Date.now()});
+        houseReq.onsuccess=()=>{
+          const houseId=houseReq.result;
+          let i=0;
+          boxStore.openCursor().onsuccess=ev=>{
+            const cur=ev.target.result;
+            if(!cur) return;
+            const b=cur.value;
+            if(b.house==null) b.house=houseId;
+            if(!b.chip) b.chip=PALETTE[i%PALETTE.length];
+            cur.update(b); i++;
+            cur.continue();
+          };
+        };
+      }
     };
     r.onsuccess=e=>res(e.target.result);
     r.onerror=()=>rej(r.error);
@@ -324,6 +414,16 @@ function toast(msg){
 }
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 
+/* ---------------- brand ---------------- */
+const PALETTE=['#E24B4A','#EF9F27','#639922','#1D9E75','#378ADD','#7F77DD','#D4537E','#888780'];
+const LOGO_SVG=`<svg viewBox="0 0 200 200"><path d="M100 38 L158 72 L158 134 L100 168 L42 134 L42 72 Z" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><path d="M42 72 L100 102 L158 72 M100 102 L100 168" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><line x1="100" y1="38" x2="128" y2="46" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><g transform="rotate(-16 150 55)"><rect x="125" y="39" width="50" height="32" rx="6" fill="#F5C400"/><circle cx="137" cy="55" r="4.5" fill="#fff"/></g></svg>`;
+function renderSwatches(container,current,onPick){
+  container.innerHTML=PALETTE.map(c=>
+    `<button type="button" class="dot${c===current?' sel':''}" style="background:${c}" data-chip="${c}" aria-label="Colour ${c}"></button>`
+  ).join('');
+  container.querySelectorAll('[data-chip]').forEach(b=>b.onclick=()=>onPick(b.dataset.chip));
+}
+
 document.querySelectorAll('nav button').forEach(b=>{
   b.onclick=()=>{
     document.querySelectorAll('nav button').forEach(x=>x.removeAttribute('aria-current'));
@@ -338,15 +438,18 @@ document.querySelectorAll('nav button').forEach(b=>{
 });
 
 /* ---------------- boxes ---------------- */
-let state={box:null, key:'', model:'claude-haiku-4-5-20251001'};
+let state={box:null, key:'', model:'claude-haiku-4-5-20251001', house:null, copies:4};
+let pickedChip=PALETTE[0];
+function pickNewBoxChip(c){ pickedChip=c; renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip); }
 
 function nextCode(boxes){
   const n=boxes.reduce((m,b)=>Math.max(m,parseInt(b.code.slice(4),10)||0),0)+1;
   return 'BOX-'+String(n).padStart(3,'0');
 }
-async function createBox(name){
+async function createBox(name,chip){
   const boxes=await getAll('boxes');
-  const box={code:nextCode(boxes), name:name||'', created:Date.now(), sealed:null};
+  const box={code:nextCode(boxes), name:name||'', created:Date.now(), sealed:null,
+             house:state.house, chip:chip||PALETTE[0]};
   await put('boxes',box);
   state.box=box.code; await put('settings',{k:'box',v:box.code});
   await refreshBoxSelects();
@@ -361,11 +464,11 @@ async function refreshBoxSelects(){
   else if(boxes.length){ state.box=boxes[0].code; $('boxPick').value=state.box; }
   $('filterBox').innerHTML='<option value="">Every box</option>'+boxes.map(opt).join('');
   const cur=boxes.find(b=>b.code===state.box);
-  $('ctxBox').innerHTML = cur? `<span class="chip">${esc(cur.code)}</span>` : '';
+  $('ctxBox').innerHTML = cur? `<span class="chip" style="background:${cur.chip||'#F5C400'}">${esc(cur.code)}</span>` : '';
 }
 $('boxPick').onchange=async e=>{ state.box=e.target.value; await put('settings',{k:'box',v:state.box}); refreshBoxSelects(); };
-$('newBoxQuick').onclick=()=>createBox('');
-$('addBox').onclick=async()=>{ await createBox($('boxName').value.trim()); $('boxName').value=''; renderBoxes(); };
+$('newBoxQuick').onclick=()=>createBox('',pickedChip);
+$('addBox').onclick=async()=>{ await createBox($('boxName').value.trim(),pickedChip); $('boxName').value=''; renderBoxes(); };
 $('sealBox').onclick=async()=>{
   if(!state.box) return toast('No box selected');
   const b=await get('boxes',state.box); b.sealed=Date.now(); await put('boxes',b);
@@ -380,10 +483,11 @@ async function renderBoxes(){
     const n=items.filter(i=>i.box===b.code).length;
     return `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
-        <div><span class="chip">${esc(b.code)}</span>
+        <div><span class="chip" style="background:${b.chip||'#F5C400'}">${esc(b.code)}</span>
           <div style="margin-top:7px;font-weight:600">${esc(b.name||'Unlabelled')}</div>
           <div class="meta"><span class="pill">${n} object${n===1?'':'s'}</span>
-          ${b.sealed?'<span class="pill">sealed</span>':''}</div></div>
+          ${b.sealed?'<span class="pill">sealed</span>':''}</div>
+          <div class="swatches" data-recolour="${esc(b.code)}" style="margin-top:8px"></div></div>
         <div class="btnrow" style="flex-direction:column">
           <button data-print="${b.code}">Label</button>
           <button data-view="${b.code}">Contents</button>
@@ -395,6 +499,10 @@ async function renderBoxes(){
     $('filterBox').value=b.dataset.view; $('q').value='';
     document.querySelector('nav button[data-go=search]').click();
   });
+  $('boxList').querySelectorAll('[data-recolour]').forEach(el=>{
+    const b=boxes.find(x=>x.code===el.dataset.recolour);
+    renderSwatches(el,b.chip,async c=>{ b.chip=c; await put('boxes',b); renderBoxes(); });
+  });
 }
 
 /* ---------------- labels ---------------- */
@@ -402,22 +510,30 @@ function qrSvg(text){
   const q=qrcode(0,'M'); q.addData(text); q.make();
   return q.createSvgTag({cellSize:3,margin:2,scalable:true,alt:text});
 }
+function labelHtml(b){
+  return `<div class="label" style="--chip:${b.chip||'#D2D8DF'}">
+    <div class="bar"></div>
+    <div class="body">
+      <span class="logo-mark">${LOGO_SVG}</span>
+      <span class="qr">${qrSvg(b.code)}</span>
+      <div class="code">${esc(b.code)}</div>
+      ${b.name?`<div class="name">${esc(b.name)}</div>`:''}
+      <div class="line">PACKED __________</div>
+    </div>
+  </div>`;
+}
 async function printLabels(codes){
   const boxes=await getAll('boxes');
   const list=boxes.filter(b=>codes.includes(b.code));
   if(!list.length) return toast('Nothing to print');
-  $('sheet').innerHTML=list.map(b=>`
-    <div class="label">
-      ${qrSvg(b.code)}
-      <div>
-        <div class="code">${esc(b.code)}</div>
-        <div class="name">${esc(b.name||'')}</div>
-        <div class="line">PACKED ____________________</div>
-      </div>
-    </div>`).join('');
+  const copies=state.copies||4;
+  const sheet=$('sheet');
+  sheet.className='copies-'+copies;
+  sheet.innerHTML=list.flatMap(b=>Array(copies).fill(b)).map(labelHtml).join('');
   setTimeout(()=>window.print(),120);
 }
 $('printAll').onclick=async()=>{ const b=await getAll('boxes'); printLabels(b.map(x=>x.code)); };
+$('copies').onchange=async e=>{ state.copies=Number(e.target.value); await put('settings',{k:'copies',v:state.copies}); };
 
 /* ---------------- capture ---------------- */
 function draw(src,edge,quality){
@@ -542,6 +658,7 @@ async function renderResults(){
   const q=$('q').value.trim().toLowerCase();
   const boxf=$('filterBox').value;
   let items=(await getAll('items')).sort((a,b)=>b.created-a.created);
+  const boxChip=Object.fromEntries((await getAll('boxes')).map(b=>[b.code,b.chip]));
   if(boxf) items=items.filter(i=>i.box===boxf);
   if(q){ const terms=q.split(/\s+/); items=items.filter(i=>{const h=hay(i);return terms.every(t=>h.includes(t))}); }
   if(!items.length){
@@ -554,7 +671,7 @@ async function renderResults(){
       <h3>${esc(i.title)}</h3>
       ${i.visible_text?`<p>“${esc(i.visible_text)}”</p>`:''}
       <div class="meta">
-        <span class="chip">${esc(i.box)}</span>
+        <span class="chip" style="background:${boxChip[i.box]||'#F5C400'}">${esc(i.box)}</span>
         ${i.category?`<span class="pill">${esc(i.category)}</span>`:''}
         ${i.material?`<span class="pill">${esc(i.material)}</span>`:''}
         ${i.state!=='done'?'<span class="pill">not identified</span>':''}
@@ -576,15 +693,22 @@ $('saveSettings').onclick=async()=>{
   await put('settings',{k:'model',v:state.model});
   toast('Saved');
 };
+$('saveHouse').onclick=async()=>{
+  const house=await get('houses',state.house);
+  house.name=$('houseName').value.trim();
+  await put('houses',house);
+  await refreshBoxSelects();
+  toast('Saved');
+};
 function download(name,blob){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),4000);
 }
 $('exportJson').onclick=async()=>{
-  const [boxes,items]=await Promise.all([getAll('boxes'),getAll('items')]);
+  const [houses,boxes,items]=await Promise.all([getAll('houses'),getAll('boxes'),getAll('items')]);
   const slim=items.map(({full,thumb,...rest})=>rest);
-  download('whatsinthebox-catalogue.json',new Blob([JSON.stringify({boxes,items:slim},null,2)],{type:'application/json'}));
+  download('whatsinthebox-catalogue.json',new Blob([JSON.stringify({houses,boxes,items:slim},null,2)],{type:'application/json'}));
 };
 $('exportPhotos').onclick=async()=>{
   const items=await getAll('items');
@@ -607,11 +731,18 @@ async function showUsage(){
 
 /* ---------------- boot ---------------- */
 (async()=>{
+  $('brandmark').innerHTML=LOGO_SVG;
   try{ db=await openDB(); }
   catch(e){ document.body.innerHTML='<p style="padding:24px;font-family:sans-serif">This browser is blocking local storage, so the catalogue cannot be kept. Open the app from its own address rather than inside another page.</p>'; return; }
   const s=await getAll('settings'); const m=Object.fromEntries(s.map(x=>[x.k,x.v]));
   state.key=m.key||''; state.model=m.model||state.model; state.box=m.box||null;
+  state.copies=m.copies||4;
+  const houses=await getAll('houses');
+  state.house=houses[0]?.id ?? null;
   $('apiKey').value=state.key; $('model').value=state.model;
+  $('copies').value=state.copies;
+  $('houseName').value=houses[0]?.name||'';
+  renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip);
   await refreshBoxSelects(); renderQueue();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!state.key) toast('Add your API key under Setup');

@@ -9,7 +9,7 @@ Six static files. No server, no build step, no framework.
 ## How it fits together
 
 ```
-iPhone (Safari, installed to home screen)
+Phone (Safari on iPhone, Chrome on Android; installed to home screen)
   |
   |-- static files ......... GitHub Pages or Cloudflare Pages
   |-- one call per photo ... api.anthropic.com
@@ -52,11 +52,15 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
 
 ## Setting it up
 
-1. Push the repo, connect it to Cloudflare Pages, open the URL in Safari.
-2. Share, then Add to Home Screen. Chrome on iOS cannot install PWAs.
+1. Push the repo, connect it to Cloudflare Pages, open the URL on the phone.
+2. iPhone: Safari, Share, then Add to Home Screen — Chrome on iOS cannot
+   install PWAs. Android: Chrome will offer to install it directly.
 3. Setup tab: paste an Anthropic API key from console.anthropic.com and save.
    Set a monthly spend limit in the Console while you are there.
-4. Boxes tab: create a box, print its label, tape it on.
+4. Boxes tab: create a box, pick a colour, print its label, tape it on. The
+   "copies per label" choice controls how many identical copies print on one
+   sheet — enough to tape on more than one side of the box — sized to use
+   the page well whether you pick 2, 4, or 6 per sheet.
 5. Capture tab: one object per photo as it goes in.
 6. Find tab: search by name, material, or text printed on the object.
 
@@ -79,10 +83,17 @@ objects.
 ## Known limits of this prototype
 
 - Data lives in this browser's IndexedDB. iOS can evict it after weeks of
-  disuse. **Export from the Setup tab regularly.** No cloud sync yet.
+  disuse. **Export from the Setup tab regularly.** No cloud sync yet, so two
+  phones (say, one iPhone and one Android) each keep their own catalogue —
+  they don't merge until sync ships.
+- Each install is one household ("house" in the data model), renamed under
+  Setup. The schema already supports more than one house per install; there
+  just isn't a switcher UI yet, since nobody's needed it.
 - Labels print but are not scanned back in; you pick the box from a list.
 - Item fields are not editable after identification, only deletable.
-- Photos are stored as data URLs, about a third larger than raw blobs.
+- Photos are stored as data URLs, about a third larger than raw blobs. This
+  matters more the bigger the catalogue gets — see the roadmap note in
+  `CLAUDE.md` if you're aiming for a large one.
 - Search is substring matching over the stored fields. Fine to a few thousand
   items, and the point at which that stops being true is the point to add
   embeddings.
