@@ -64,6 +64,26 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
 5. Capture tab: one object per photo as it goes in.
 6. Find tab: search by name, material, or text printed on the object.
 
+## Syncing two phones (OneDrive)
+
+Not usable yet without one setup step: register a free app at
+[portal.azure.com](https://portal.azure.com) (App registrations → New
+registration → account type "personal Microsoft accounts", redirect URI =
+this site's URL as an SPA, add the `Files.ReadWrite` Graph permission), then
+replace `MS_CLIENT_ID` near the top of the sync code in `index.html` with
+the client ID it gives you. No cost, no client secret needed.
+
+Once that's done, on Setup:
+1. Set a **sync passphrase** — the same one on both phones. It encrypts
+   everything before it ever reaches OneDrive, so OneDrive only ever holds
+   unreadable bytes. Put it in a password manager: if it's lost, whatever
+   synced under it is unrecoverable, by design.
+2. **Connect OneDrive** — signs into your own personal Microsoft account.
+   Each of you uses your own account; share the `WhatsInTheBox` folder
+   OneDrive creates from one account to the other, the normal OneDrive way.
+3. **Sync now** whenever you want the two catalogues to merge. It also
+   fetches on its own each time the app is opened with a connection.
+
 ## Local development
 
 ```bash
@@ -83,9 +103,12 @@ objects.
 ## Known limits of this prototype
 
 - Data lives in this browser's IndexedDB. iOS can evict it after weeks of
-  disuse. **Export from the Setup tab regularly.** No cloud sync yet, so two
-  phones (say, one iPhone and one Android) each keep their own catalogue —
-  they don't merge until sync ships.
+  disuse. **Export from the Setup tab regularly** even with sync configured.
+- Sync doesn't propagate deletions yet (deleting an item on one phone can
+  have it reappear from the other phone's next sync), and if both phones
+  create a brand-new box before either has ever synced, they could
+  coincidentally pick the same box code. Both are documented, scoped
+  limitations in `CLAUDE.md`, not bugs waiting to be found.
 - Each install is one household ("house" in the data model), renamed under
   Setup. The schema already supports more than one house per install; there
   just isn't a switcher UI yet, since nobody's needed it.

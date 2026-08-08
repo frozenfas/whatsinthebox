@@ -294,6 +294,17 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
       <button class="primary" id="saveHouse" style="width:100%">Save</button>
     </div>
     <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Sync between phones</div>
+      <label class="field"><span>Sync passphrase. Same on both phones - keep it in a password manager, it can't be recovered if lost.</span>
+        <input type="password" id="syncPassphrase" placeholder="a phrase only the two of you know" autocomplete="off"></label>
+      <button class="primary" id="saveSyncPassphrase" style="width:100%;margin-bottom:10px">Save passphrase</button>
+      <div class="btnrow">
+        <button id="connectOneDrive">Connect OneDrive</button>
+        <button id="syncNow">Sync now</button>
+      </div>
+      <div id="syncStatus" style="font-size:13px;color:var(--muted);margin-top:10px"></div>
+    </div>
+    <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">Identification</div>
       <label class="field"><span>Anthropic API key. Stored on this phone only.</span>
         <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off"></label>
@@ -350,8 +361,27 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
  * ones after its current version. Never remove or rename a field in
  * place; add the new one, migrate data across with a cursor, and
  * leave the old field alone if anything might still read it. */
-const DB_NAME='whatsinthebox', DB_VER=2;
+const DB_NAME='whatsinthebox', DB_VER=3;
 let db;
+
+// Walks every record in `store`, letting `fn` mutate each one in place,
+// and only resolves once the whole store has been visited. Migration
+// blocks that touch the same store MUST await this rather than firing
+// their own independent cursor, or two unsequenced read-modify-write
+// passes race and one silently clobbers the other's changes.
+function walkCursor(store, fn){
+  return new Promise((resolve,reject)=>{
+    const req=store.openCursor();
+    req.onerror=()=>reject(req.error);
+    req.onsuccess=ev=>{
+      const cur=ev.target.result;
+      if(!cur){ resolve(); return; }
+      fn(cur.value);
+      cur.update(cur.value);
+      cur.continue();
+    };
+  });
+}
 
 function openDB(){
   return new Promise((res,rej)=>{
@@ -361,38 +391,61 @@ function openDB(){
       const t=e.target.transaction;
       const from=e.oldVersion;
 
-      if(from<1){
-        if(!d.objectStoreNames.contains('boxes')) d.createObjectStore('boxes',{keyPath:'code'});
-        if(!d.objectStoreNames.contains('items')){
-          const s=d.createObjectStore('items',{keyPath:'id',autoIncrement:true});
-          s.createIndex('box','box'); s.createIndex('state','state');
+      (async()=>{
+        if(from<1){
+          if(!d.objectStoreNames.contains('boxes')) d.createObjectStore('boxes',{keyPath:'code'});
+          if(!d.objectStoreNames.contains('items')){
+            const s=d.createObjectStore('items',{keyPath:'id',autoIncrement:true});
+            s.createIndex('box','box'); s.createIndex('state','state');
+          }
+          if(!d.objectStoreNames.contains('settings')) d.createObjectStore('settings',{keyPath:'k'});
         }
-        if(!d.objectStoreNames.contains('settings')) d.createObjectStore('settings',{keyPath:'k'});
-      }
 
-      if(from<2){
-        // Houses become the top-level unit, so the same app can hold more
-        // than one household's boxes and (once sync exists) sync one house
-        // at a time. Existing boxes get filed under a new default house
-        // and given a tag colour, so nothing already packed loses its place.
-        const houses=d.createObjectStore('houses',{keyPath:'id',autoIncrement:true});
-        const boxStore=t.objectStore('boxes');
-        boxStore.createIndex('house','house');
-        const houseReq=houses.add({name:'My house',created:Date.now()});
-        houseReq.onsuccess=()=>{
-          const houseId=houseReq.result;
+        // Schema changes for from<2 and from<3 happen up front; the data
+        // backfill for both is done in ONE combined pass per store below.
+        // Two separate walkCursor calls on the same store, in separate
+        // blocks, is what caused the earlier bug this comment replaces:
+        // the second pass silently lost the first pass's writes inside an
+        // upgrade transaction. One pass per store per store, always.
+        let houseId=null;
+        if(from<2){
+          // Houses become the top-level unit, so the same app can hold more
+          // than one household's boxes and (once sync exists) sync one house
+          // at a time.
+          const houses=d.createObjectStore('houses',{keyPath:'id',autoIncrement:true});
+          t.objectStore('boxes').createIndex('house','house');
+          houseId=await new Promise((res2,rej2)=>{
+            const req=houses.add({name:'My house',created:Date.now()});
+            req.onsuccess=()=>res2(req.result); req.onerror=()=>rej2(req.error);
+          });
+        }
+
+        if(from<2 || from<3){
           let i=0;
-          boxStore.openCursor().onsuccess=ev=>{
-            const cur=ev.target.result;
-            if(!cur) return;
-            const b=cur.value;
-            if(b.house==null) b.house=houseId;
-            if(!b.chip) b.chip=PALETTE[i%PALETTE.length];
-            cur.update(b); i++;
-            cur.continue();
-          };
-        };
-      }
+          await walkCursor(t.objectStore('boxes'), b=>{
+            if(from<2){
+              // Existing boxes get filed under the new default house and
+              // given a tag colour, so nothing already packed loses its place.
+              if(b.house==null) b.house=houseId;
+              if(!b.chip) b.chip=PALETTE[i%PALETTE.length];
+              i++;
+            }
+            if(from<3){
+              // Sync (OneDrive) needs a way to tell whose copy is newer.
+              if(b.updated==null) b.updated=b.created||Date.now();
+            }
+          });
+        }
+
+        if(from<3){
+          // A cross-device id for items, since their local `id` is a
+          // per-device auto-increment integer that collides by design.
+          await walkCursor(t.objectStore('items'), it=>{
+            if(it.updated==null) it.updated=it.created||Date.now();
+            if(!it.uid) it.uid=crypto.randomUUID();
+          });
+        }
+      })();
     };
     r.onsuccess=e=>res(e.target.result);
     r.onerror=()=>rej(r.error);
@@ -404,6 +457,219 @@ const getAll=s=>req(tx(s).getAll());
 const put=(s,v)=>req(tx(s,'readwrite').put(v));
 const del=(s,k)=>req(tx(s,'readwrite').delete(k));
 const get=(s,k)=>req(tx(s).get(k));
+
+/* ---------------- encryption ----------------
+ * Everything that leaves the device for OneDrive goes through here first.
+ * OneDrive only ever sees the output of encryptText - opaque bytes, not the
+ * catalogue. The passphrase never leaves the device either; only its
+ * derived key lives in memory, and only for this session. */
+let syncKey=null;
+
+function bytesToB64(bytes){ let s=''; bytes.forEach(b=>s+=String.fromCharCode(b)); return btoa(s); }
+function b64ToBytes(b64){ return Uint8Array.from(atob(b64), c=>c.charCodeAt(0)); }
+
+async function deriveSyncKey(passphrase, saltBytes){
+  const material=await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt:saltBytes, iterations:210000, hash:'SHA-256'},
+    material,
+    {name:'AES-GCM', length:256},
+    false,
+    ['encrypt','decrypt']
+  );
+}
+async function encryptText(text){
+  if(!syncKey) throw new Error('Sync passphrase not set');
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const cipher=await crypto.subtle.encrypt({name:'AES-GCM', iv}, syncKey, new TextEncoder().encode(text));
+  return bytesToB64(iv)+'.'+bytesToB64(new Uint8Array(cipher));
+}
+async function decryptText(payload){
+  if(!syncKey) throw new Error('Sync passphrase not set');
+  const [ivB64,cipherB64]=payload.split('.');
+  const plain=await crypto.subtle.decrypt({name:'AES-GCM', iv:b64ToBytes(ivB64)}, syncKey, b64ToBytes(cipherB64));
+  return new TextDecoder().decode(plain);
+}
+const encryptJson=obj=>encryptText(JSON.stringify(obj));
+const decryptJson=async payload=>JSON.parse(await decryptText(payload));
+
+/* ---------------- OneDrive auth ----------------
+ * Hand-rolled OAuth2 Authorization Code + PKCE against the Microsoft
+ * identity platform - no MSAL. MSAL's CDN build stops at v2, which
+ * Microsoft has told developers to move off; a build step to get v3 would
+ * break this project's no-build-step rule. This is ~80 lines with fetch
+ * and Web Crypto, both already used elsewhere here, and it means every
+ * byte of auth state can live in the `settings` IndexedDB store rather
+ * than needing localStorage just for a token cache. */
+const MS_CLIENT_ID='REPLACE_WITH_AZURE_APP_CLIENT_ID';
+const MS_AUTHORITY='https://login.microsoftonline.com/common/oauth2/v2.0';
+const MS_SCOPES='Files.ReadWrite offline_access';
+const MS_REDIRECT=location.origin+location.pathname;
+
+function b64url(bytes){ return bytesToB64(bytes).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+async function pkcePair(){
+  const verifier=b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const hash=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return {verifier, challenge:b64url(new Uint8Array(hash))};
+}
+async function connectOneDrive(){
+  const {verifier,challenge}=await pkcePair();
+  await put('settings',{k:'msVerifier',v:verifier});
+  const url=new URL(MS_AUTHORITY+'/authorize');
+  url.search=new URLSearchParams({
+    client_id:MS_CLIENT_ID, response_type:'code', redirect_uri:MS_REDIRECT,
+    scope:MS_SCOPES, code_challenge:challenge, code_challenge_method:'S256',
+    response_mode:'query'
+  });
+  location.href=url.toString();
+}
+async function disconnectOneDrive(){ await del('settings','msTokens'); }
+async function saveTokens(tok){
+  await put('settings',{k:'msTokens',v:{
+    access:tok.access_token, refresh:tok.refresh_token,
+    expires:Date.now()+tok.expires_in*1000-60000
+  }});
+}
+async function handleAuthRedirect(){
+  const params=new URLSearchParams(location.search);
+  const code=params.get('code'), err=params.get('error');
+  if(!code && !err) return;
+  history.replaceState({}, '', MS_REDIRECT);
+  if(err){ toast('OneDrive connect cancelled'); return; }
+  const verifierRow=await get('settings','msVerifier');
+  const body=new URLSearchParams({
+    client_id:MS_CLIENT_ID, grant_type:'authorization_code', code,
+    redirect_uri:MS_REDIRECT, code_verifier:verifierRow?.v||''
+  });
+  const r=await fetch(MS_AUTHORITY+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});
+  const tok=await r.json();
+  if(!r.ok){ toast('OneDrive connect failed: '+(tok.error_description||tok.error||r.status)); return; }
+  await saveTokens(tok);
+  toast('OneDrive connected');
+}
+async function getAccessToken(){
+  const row=await get('settings','msTokens');
+  if(!row) return null;
+  if(Date.now()<row.v.expires) return row.v.access;
+  const body=new URLSearchParams({
+    client_id:MS_CLIENT_ID, grant_type:'refresh_token', refresh_token:row.v.refresh, scope:MS_SCOPES
+  });
+  const r=await fetch(MS_AUTHORITY+'/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});
+  const tok=await r.json();
+  if(!r.ok){ toast('OneDrive session expired - reconnect under Setup'); return null; }
+  await saveTokens(tok);
+  return tok.access_token;
+}
+
+/* ---------------- OneDrive sync ----------------
+ * One encrypted JSON file per box: the box's own fields plus its items,
+ * photos included (they're already inline data URLs in the local store,
+ * same as everywhere else in this app). Whichever side has the newer
+ * `updated` wins for that box, whole file at a time - no per-field merge.
+ *
+ * Deliberately does not sync deletions yet: pulling a box only adds or
+ * updates items by `uid`, it never removes a local item that's merely
+ * absent from the remote copy. That is what stops a pull from wiping out
+ * an item you added on this phone before it had a chance to sync. The
+ * cost is that a deletion made on one phone won't remove that item from
+ * the other phone until real tombstones are built - known limitation,
+ * not an oversight. */
+const GRAPH='https://graph.microsoft.com/v1.0';
+const SYNC_FOLDER='WhatsInTheBox';
+
+async function graphFetch(path, opts={}){
+  const token=await getAccessToken();
+  if(!token) throw new Error('Not connected to OneDrive');
+  return fetch(GRAPH+path, {...opts, headers:{...(opts.headers||{}), Authorization:'Bearer '+token}});
+}
+async function ensureSyncFolder(){
+  const check=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER));
+  if(check.ok) return;
+  if(check.status!==404) throw new Error('OneDrive folder check failed ('+check.status+')');
+  const create=await graphFetch('/me/drive/root/children', {
+    method:'POST', headers:{'content-type':'application/json'},
+    body:JSON.stringify({name:SYNC_FOLDER, folder:{}, '@microsoft.graph.conflictBehavior':'rename'})
+  });
+  if(!create.ok) throw new Error('Could not create the OneDrive folder');
+}
+async function getFile(name){
+  const r=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER)+'/'+encodeURIComponent(name)+':/content');
+  if(r.status===404) return null;
+  if(!r.ok) throw new Error('Could not download '+name);
+  return r.text();
+}
+async function putFile(name, text){
+  const r=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER)+'/'+encodeURIComponent(name)+':/content',
+    {method:'PUT', headers:{'content-type':'text/plain'}, body:text});
+  if(!r.ok) throw new Error('Could not upload '+name);
+}
+async function listFiles(){
+  const r=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER)+':/children?$select=name');
+  if(!r.ok) throw new Error('Could not list the OneDrive folder');
+  const data=await r.json();
+  return (data.value||[]).map(f=>f.name);
+}
+async function ensureSyncKey(passphrase){
+  const saltB64=await getFile('salt.txt');
+  let saltBytes;
+  if(saltB64){ saltBytes=b64ToBytes(saltB64.trim()); }
+  else{ saltBytes=crypto.getRandomValues(new Uint8Array(16)); await putFile('salt.txt', bytesToB64(saltBytes)); }
+  syncKey=await deriveSyncKey(passphrase, saltBytes);
+}
+async function pushBox(code){
+  const box=await get('boxes',code);
+  if(!box) return;
+  const items=(await getAll('items')).filter(i=>i.box===code);
+  const payload=await encryptJson({box:{...box, house:undefined}, items});
+  await putFile(code+'.box.json', payload);
+}
+async function mergeRemoteBox(remote){
+  await put('boxes', {...remote.box, house:state.house});
+  const localItems=await getAll('items');
+  for(const it of remote.items){
+    const existing=localItems.find(x=>x.uid===it.uid);
+    const copy={...it};
+    if(existing) copy.id=existing.id; else delete copy.id;
+    await put('items', copy);
+  }
+}
+async function syncNow(){
+  if(!state.syncPassphrase) return toast('Set a sync passphrase under Setup');
+  const token=await getAccessToken();
+  if(!token) return toast('Connect OneDrive under Setup first');
+  showSyncStatus('Syncing…');
+  try{
+    await ensureSyncFolder();
+    await ensureSyncKey(state.syncPassphrase);
+    const remoteNames=await listFiles();
+    const remoteBoxCodes=remoteNames.filter(n=>n.endsWith('.box.json')).map(n=>n.replace('.box.json',''));
+    const localCodes=(await getAll('boxes')).map(b=>b.code);
+    const allCodes=[...new Set([...remoteBoxCodes, ...localCodes])];
+    // Decrypt every remote box up front. Any failure here aborts before
+    // anything is pushed - a wrong passphrase must never overwrite the
+    // other phone's good data with something re-encrypted under the
+    // wrong key.
+    const decrypted={};
+    for(const code of remoteBoxCodes){
+      const raw=await getFile(code+'.box.json');
+      if(!raw) continue;
+      try{ decrypted[code]=await decryptJson(raw); }
+      catch(e){ throw new Error('Could not read '+code+' - check the sync passphrase matches the other phone'); }
+    }
+    for(const code of allCodes){
+      const local=await get('boxes', code);
+      const remote=decrypted[code];
+      if(remote && (!local || remote.box.updated>local.updated)) await mergeRemoteBox(remote);
+      else await pushBox(code);
+    }
+    await put('settings',{k:'lastSync',v:Date.now()});
+    await refreshBoxSelects(); renderBoxes();
+    toast('Synced');
+  }catch(e){
+    toast('Sync failed: '+e.message);
+  }
+  showSyncStatus();
+}
 
 /* ---------------- ui helpers ---------------- */
 const $=id=>document.getElementById(id);
@@ -432,7 +698,7 @@ document.querySelectorAll('nav button').forEach(b=>{
     $('v-'+b.dataset.go).classList.add('active');
     if(b.dataset.go==='search') renderResults();
     if(b.dataset.go==='boxes') renderBoxes();
-    if(b.dataset.go==='settings') showUsage();
+    if(b.dataset.go==='settings') { showUsage(); showSyncStatus(); }
     window.scrollTo(0,0);
   };
 });
@@ -446,9 +712,13 @@ function nextCode(boxes){
   const n=boxes.reduce((m,b)=>Math.max(m,parseInt(b.code.slice(4),10)||0),0)+1;
   return 'BOX-'+String(n).padStart(3,'0');
 }
+async function touchBox(code){
+  const b=await get('boxes',code);
+  if(b){ b.updated=Date.now(); await put('boxes',b); }
+}
 async function createBox(name,chip){
   const boxes=await getAll('boxes');
-  const box={code:nextCode(boxes), name:name||'', created:Date.now(), sealed:null,
+  const box={code:nextCode(boxes), name:name||'', created:Date.now(), updated:Date.now(), sealed:null,
              house:state.house, chip:chip||PALETTE[0]};
   await put('boxes',box);
   state.box=box.code; await put('settings',{k:'box',v:box.code});
@@ -471,7 +741,7 @@ $('newBoxQuick').onclick=()=>createBox('',pickedChip);
 $('addBox').onclick=async()=>{ await createBox($('boxName').value.trim(),pickedChip); $('boxName').value=''; renderBoxes(); };
 $('sealBox').onclick=async()=>{
   if(!state.box) return toast('No box selected');
-  const b=await get('boxes',state.box); b.sealed=Date.now(); await put('boxes',b);
+  const b=await get('boxes',state.box); b.sealed=Date.now(); b.updated=Date.now(); await put('boxes',b);
   await refreshBoxSelects(); toast(b.code+' sealed');
 };
 
@@ -501,7 +771,7 @@ async function renderBoxes(){
   });
   $('boxList').querySelectorAll('[data-recolour]').forEach(el=>{
     const b=boxes.find(x=>x.code===el.dataset.recolour);
-    renderSwatches(el,b.chip,async c=>{ b.chip=c; await put('boxes',b); renderBoxes(); });
+    renderSwatches(el,b.chip,async c=>{ b.chip=c; b.updated=Date.now(); await put('boxes',b); renderBoxes(); });
   });
 }
 
@@ -567,9 +837,10 @@ $('shot').onchange=async e=>{
   if(!state.box){ await createBox(''); }
   try{
     const [full,thumb]=await Promise.all([resize(file,1024,.85), resize(file,320,.7)]);
-    const item={box:state.box, full, thumb, state:'pending', created:Date.now(),
-                title:'Not identified yet', tags:[]};
+    const item={box:state.box, full, thumb, state:'pending', created:Date.now(), updated:Date.now(),
+                uid:crypto.randomUUID(), title:'Not identified yet', tags:[]};
     const id=await put('items',item); item.id=id;
+    await touchBox(item.box);
     showLast(item);
     renderQueue();
     if(state.key) classify(id);
@@ -613,7 +884,7 @@ const SCHEMA=`{
 async function classify(id){
   const item=await get('items',id);
   if(!item||item.state==='done') return;
-  await put('items',{...item,state:'working'});
+  await put('items',{...item,state:'working',updated:Date.now()});
   try{
     const r=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
@@ -640,7 +911,8 @@ async function classify(id){
     const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
     const clean=text.replace(/```json|```/g,'').trim();
     const o=JSON.parse(clean);
-    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done'});
+    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now()});
+    await touchBox(item.box);
     if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
     renderQueue();
   }catch(err){
@@ -677,10 +949,10 @@ async function renderResults(){
         ${i.state!=='done'?'<span class="pill">not identified</span>':''}
       </div>
     </div>
-    <button data-del="${i.id}" class="danger" aria-label="Delete">✕</button>
+    <button data-del="${i.id}" data-delbox="${esc(i.box)}" class="danger" aria-label="Delete">✕</button>
   </div></div>`).join('');
   $('results').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
-    await del('items',Number(b.dataset.del)); renderResults(); toast('Deleted');
+    await del('items',Number(b.dataset.del)); await touchBox(b.dataset.delbox); renderResults(); toast('Deleted');
   });
 }
 $('q').oninput=renderResults;
@@ -700,6 +972,26 @@ $('saveHouse').onclick=async()=>{
   await refreshBoxSelects();
   toast('Saved');
 };
+$('saveSyncPassphrase').onclick=async()=>{
+  state.syncPassphrase=$('syncPassphrase').value;
+  await put('settings',{k:'syncPassphrase',v:state.syncPassphrase});
+  toast('Passphrase saved');
+};
+$('connectOneDrive').onclick=async()=>{
+  const tokRow=await get('settings','msTokens');
+  if(tokRow){ await disconnectOneDrive(); showSyncStatus(); toast('OneDrive disconnected'); }
+  else{ connectOneDrive(); }
+};
+$('syncNow').onclick=syncNow;
+async function showSyncStatus(msg){
+  if(msg){ $('syncStatus').textContent=msg; return; }
+  const tokRow=await get('settings','msTokens');
+  const lastRow=await get('settings','lastSync');
+  $('connectOneDrive').textContent=tokRow?'Disconnect OneDrive':'Connect OneDrive';
+  const parts=[tokRow?'OneDrive connected':'OneDrive not connected'];
+  if(lastRow?.v) parts.push('last synced '+new Date(lastRow.v).toLocaleString());
+  $('syncStatus').textContent=parts.join(' · ');
+}
 function download(name,blob){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
@@ -734,18 +1026,25 @@ async function showUsage(){
   $('brandmark').innerHTML=LOGO_SVG;
   try{ db=await openDB(); }
   catch(e){ document.body.innerHTML='<p style="padding:24px;font-family:sans-serif">This browser is blocking local storage, so the catalogue cannot be kept. Open the app from its own address rather than inside another page.</p>'; return; }
+  await handleAuthRedirect();
   const s=await getAll('settings'); const m=Object.fromEntries(s.map(x=>[x.k,x.v]));
   state.key=m.key||''; state.model=m.model||state.model; state.box=m.box||null;
   state.copies=m.copies||4;
+  state.syncPassphrase=m.syncPassphrase||'';
   const houses=await getAll('houses');
   state.house=houses[0]?.id ?? null;
   $('apiKey').value=state.key; $('model').value=state.model;
   $('copies').value=state.copies;
   $('houseName').value=houses[0]?.name||'';
+  $('syncPassphrase').value=state.syncPassphrase;
   renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip);
   await refreshBoxSelects(); renderQueue();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!state.key) toast('Add your API key under Setup');
+  if(state.syncPassphrase && navigator.onLine){
+    const tokRow=await get('settings','msTokens');
+    if(tokRow) syncNow(); // fire and forget - quiet background sync on open, not on the critical path
+  }
 })();
 </script>
 </body>

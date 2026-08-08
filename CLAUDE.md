@@ -30,6 +30,8 @@ Personal project, one install per household. Target device is a phone browser
 | Location lives on the box, not the item | Moving a box relocates all its contents with one write. |
 | No local classifier or embedding model | Structured JSON from the vision model plus substring search is enough at this scale. Revisit above ~2000 items. |
 | iCloud rejected for sync | No usable API for a web app. CloudKit JS needs a developer container. OneDrive via Microsoft Graph is the intended path. |
+| No MSAL.js for OneDrive auth; hand-rolled OAuth2 Authorization Code + PKCE instead | MSAL's CDN build stopped at v2 - Microsoft's own docs say v3+ requires a package manager or bundler, which breaks the no-build-step rule. The hand-rolled flow is ~80 lines of `fetch` + Web Crypto, and keeps every byte of auth state in the `settings` IndexedDB store instead of needing `localStorage` for a token cache. |
+| Sync stores the passphrase, never uploads it; OneDrive only ever sees encrypted bytes | Privacy was the explicit priority when this was designed. A lost passphrase makes synced data permanently unrecoverable - that's the deliberate cost, not a bug. |
 | Houses are the top-level entity, above boxes | Two phones (iPhone + Android) already mean two isolated IndexedDBs with no sync. Houses give the eventual sync (OneDrive roadmap item) a natural partition, and let one install hold more than one household's boxes without redesigning the schema. No switcher UI yet — one house is created automatically, renamed under Setup. |
 | `DB_VER` only ever increases; migrations are additive | The catalogue is the only copy of months of packing data on someone's phone. See "Data model versioning" below — this is the pattern every future schema change must follow. |
 
@@ -45,10 +47,10 @@ Personal project, one install per household. Target device is a phone browser
 
 ```
 houses   { id, name, created }                              keyPath: id (auto)
-boxes    { code: "BOX-001", name, created, sealed,          keyPath: code
-           house, chip }                                    index: house
-items    { id, box, full, thumb, state, created,            keyPath: id (auto)
-           title, category, material, colour,               indexes: box, state
+boxes    { code: "BOX-001", name, created, updated, sealed,  keyPath: code
+           house, chip }                                     index: house
+items    { id, uid, box, full, thumb, state, created,        keyPath: id (auto)
+           updated, title, category, material, colour,       indexes: box, state
            approx_size_cm, visible_text, condition,
            tags[], confidence }
 settings { k, v }                                            keyPath: k
@@ -62,6 +64,15 @@ and the in-app chip — kept separate from `item.colour` (the object's own
 dominant colour, set by the vision model) even though the names are similar.
 Items don't carry `house` directly; they're scoped to a house through their
 box, so a box move never needs to touch its items.
+
+`updated` (on both boxes and items) and `item.uid` exist for sync, not for
+the UI. `updated` decides which side wins when two phones both have a copy
+of the same box - see Sync below. `uid` (`crypto.randomUUID()`) is what
+sync matches items on across devices, because `id` is a per-device
+auto-increment integer that two phones will happily generate the same
+value for independently. Every code path that changes an item must call
+`touchBox(item.box)` afterwards so the *box's* `updated` reflects the
+change - sync only looks at the box's timestamp, not each item's.
 
 ## Data model versioning
 
@@ -87,6 +98,46 @@ When a change needs a new store, index, or field:
 This is the only way schema changes are safe to ship: nobody can run a
 migration script against a phone that's face-down in a box in someone's
 loft. The upgrade has to run itself, the next time the app happens to open.
+
+## Sync (OneDrive)
+
+Two phones, two separate personal Microsoft accounts, one shared OneDrive
+folder (`WhatsInTheBox`) that one of them creates and shares with the
+other the normal OneDrive way. Everything that reaches OneDrive is
+encrypted client-side first - see the `/* ---------------- encryption
+---------------- */` and `/* ---------------- OneDrive sync
+---------------- */` sections in `index.html` for the actual code and
+their own inline reasoning.
+
+**Status: built, not yet configured or tested live.** `MS_CLIENT_ID` in
+`index.html` is a placeholder - sync cannot work until it's replaced with
+a real Azure app registration's client ID (SPA redirect URI, `Files.ReadWrite`
+delegated scope, "personal Microsoft accounts" supported). Everything
+that doesn't require live OAuth was verified directly: encryption
+round-trips, a wrong passphrase correctly fails closed instead of
+overwriting good remote data, and a full push-then-pull cycle was tested
+against a mocked Graph API. The actual OAuth redirect flow needs a real
+device and a real Microsoft login to verify - untested until that happens.
+
+**Known limitations, deliberately scoped this way for v1, not oversights:**
+- **Deletions don't sync.** Pulling a box only adds or updates items by
+  `uid`; it never removes a local item just because the remote copy lacks
+  it. That's what stops a pull from wiping out an item you added on this
+  phone before it had a chance to sync - the alternative (treat the
+  remote item list as authoritative) risks real data loss. The cost:
+  delete an item on one phone, and it can reappear from the other phone's
+  next push until real tombstones are built.
+- **Box codes can theoretically collide.** `nextCode()` only looks at
+  boxes already known to *this* device. If both phones create a new box
+  before either has synced even once, they could pick the same code, and
+  the later sync silently lets one overwrite the other. Narrow window in
+  practice (sync before a fresh install starts creating boxes), but real -
+  a merge-time collision detector would close it properly.
+- **Whole-box last-write-wins, not per-field merge.** If both phones edit
+  the *same* box while both are offline, the newer `updated` wins entirely;
+  the older edit is just gone. Fine for how this app is actually used
+  (pack into a box on one phone at a time); would need real conflict
+  resolution to be safe for genuinely concurrent editing.
 
 ## Running it
 
@@ -117,9 +168,10 @@ the install prompt works without any certificate.
 
 ## Roadmap, in order
 
-1. OneDrive sync via Microsoft Graph and MSAL.js. One JSON per box plus photos
-   as separate files. Never sync a live SQLite-style single file. Syncs one
-   house at a time, now that houses exist as the top-level entity.
+1. Configure and live-test OneDrive sync (see Sync above) - it's built, it
+   just hasn't been pointed at a real Azure app registration or tried on
+   real devices yet. After that: proper deletion tombstones and box-code
+   collision handling, the two known gaps called out above.
 2. Scan a printed label to jump to that box's contents. Needs jsQR, since
    Safari has no `BarcodeDetector`.
 3. Edit an item's fields after identification. Currently delete-only.
