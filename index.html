@@ -297,6 +297,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
       <div class="eyebrow" style="margin-bottom:8px">Sync between phones</div>
       <label class="field"><span>Sync passphrase. Same on both phones - keep it in a password manager, it can't be recovered if lost.</span>
         <input type="password" id="syncPassphrase" placeholder="a phrase only the two of you know" autocomplete="off"></label>
+      <div id="passphraseStatus" style="font-size:13px;color:var(--muted);margin:-8px 0 12px"></div>
       <button class="primary" id="saveSyncPassphrase" style="width:100%;margin-bottom:10px">Save passphrase</button>
       <div class="btnrow">
         <button id="connectOneDrive">Connect OneDrive</button>
@@ -694,7 +695,7 @@ document.querySelectorAll('nav button').forEach(b=>{
     $('v-'+b.dataset.go).classList.add('active');
     if(b.dataset.go==='search') renderResults();
     if(b.dataset.go==='boxes') renderBoxes();
-    if(b.dataset.go==='settings') { showUsage(); showSyncStatus(); }
+    if(b.dataset.go==='settings') { showUsage(); showSyncStatus(); showPassphraseStatus(); }
     window.scrollTo(0,0);
   };
 });
@@ -968,9 +969,20 @@ $('saveHouse').onclick=async()=>{
   await refreshBoxSelects();
   toast('Saved');
 };
+function showPassphraseStatus(){
+  $('passphraseStatus').textContent = state.syncPassphrase
+    ? 'Passphrase is set on this phone.'
+    : 'No passphrase set yet - sync will not work until one is saved here and on the other phone.';
+}
 $('saveSyncPassphrase').onclick=async()=>{
-  state.syncPassphrase=$('syncPassphrase').value;
+  const next=$('syncPassphrase').value;
+  if(state.syncPassphrase && next!==state.syncPassphrase){
+    const sure=confirm('This replaces the sync passphrase already set on this phone. Anything already synced under the old one won\'t be readable here anymore, and syncing with the other phone will stop working until it\'s set to match there too. Continue?');
+    if(!sure) return;
+  }
+  state.syncPassphrase=next;
   await put('settings',{k:'syncPassphrase',v:state.syncPassphrase});
+  showPassphraseStatus();
   toast('Passphrase saved');
 };
 $('connectOneDrive').onclick=async()=>{
