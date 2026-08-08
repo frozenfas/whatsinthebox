@@ -503,7 +503,7 @@ const decryptJson=async payload=>JSON.parse(await decryptText(payload));
  * than needing localStorage just for a token cache. */
 const MS_CLIENT_ID='42762842-c9da-4c57-b2d0-29be1fdcb08b';
 const MS_AUTHORITY='https://login.microsoftonline.com/consumers/oauth2/v2.0';
-const MS_SCOPES='Files.ReadWrite offline_access';
+const MS_SCOPES='Files.ReadWrite.AppFolder offline_access';
 const MS_REDIRECT=location.origin+location.pathname;
 
 function b64url(bytes){ return bytesToB64(bytes).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
@@ -575,62 +575,33 @@ async function getAccessToken(){
  * the other phone until real tombstones are built - known limitation,
  * not an oversight. */
 const GRAPH='https://graph.microsoft.com/v1.0';
-const SYNC_FOLDER='WhatsInTheBox';
+// The app's dedicated OneDrive folder, addressed via the Graph "special"
+// path rather than a name we search for. This only exists because both
+// phones sign into the SAME shared Microsoft account (see CLAUDE.md) -
+// that's what makes the narrow Files.ReadWrite.AppFolder scope possible:
+// there's no cross-account sharing to resolve, both phones are just "the
+// owner" of the one account's one app folder. It auto-creates itself on
+// first access, so nothing has to explicitly create it.
+const APPROOT='/me/drive/special/approot';
 
 async function graphFetch(path, opts={}){
   const token=await getAccessToken();
   if(!token) throw new Error('Not connected to OneDrive');
   return fetch(GRAPH+path, {...opts, headers:{...(opts.headers||{}), Authorization:'Bearer '+token}});
 }
-// The two phones use two different personal accounts, so only ONE of them
-// owns the WhatsInTheBox folder in their own drive root - the other sees
-// it as a shared item, which the Graph API addresses completely
-// differently (/drives/{driveId}/items/{itemId}, not /me/drive/root:/...).
-// resolveSyncFolder figures out which case applies and returns a
-// {driveId,itemId} pair that every other function below addresses
-// uniformly, so it works correctly on both phones regardless of who
-// created the folder.
-let syncFolder=null;
-async function resolveSyncFolder(){
-  const own=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER));
-  if(own.ok){
-    const d=await own.json();
-    return {driveId:d.parentReference.driveId, itemId:d.id};
-  }
-  if(own.status!==404) throw new Error('OneDrive folder check failed ('+own.status+')');
-
-  const shared=await graphFetch('/me/drive/sharedWithMe');
-  if(shared.ok){
-    const d=await shared.json();
-    const match=(d.value||[]).find(it=>it.name===SYNC_FOLDER && it.remoteItem);
-    if(match) return {driveId:match.remoteItem.parentReference.driveId, itemId:match.remoteItem.id};
-  }
-
-  // Nobody has created it yet on either side - this device becomes the
-  // owner. Whoever syncs first each new "first ever" folder; after that,
-  // share it with the other phone's account the normal OneDrive way.
-  const create=await graphFetch('/me/drive/root/children', {
-    method:'POST', headers:{'content-type':'application/json'},
-    body:JSON.stringify({name:SYNC_FOLDER, folder:{}, '@microsoft.graph.conflictBehavior':'rename'})
-  });
-  if(!create.ok) throw new Error('Could not create the OneDrive folder');
-  const d=await create.json();
-  return {driveId:d.parentReference.driveId, itemId:d.id};
-}
-function folderBase(){ return '/drives/'+syncFolder.driveId+'/items/'+syncFolder.itemId; }
 async function getFile(name){
-  const r=await graphFetch(folderBase()+':/'+encodeURIComponent(name)+':/content');
+  const r=await graphFetch(APPROOT+':/'+encodeURIComponent(name)+':/content');
   if(r.status===404) return null;
   if(!r.ok) throw new Error('Could not download '+name);
   return r.text();
 }
 async function putFile(name, text){
-  const r=await graphFetch(folderBase()+':/'+encodeURIComponent(name)+':/content',
+  const r=await graphFetch(APPROOT+':/'+encodeURIComponent(name)+':/content',
     {method:'PUT', headers:{'content-type':'text/plain'}, body:text});
   if(!r.ok) throw new Error('Could not upload '+name);
 }
 async function listFiles(){
-  const r=await graphFetch(folderBase()+'/children?$select=name');
+  const r=await graphFetch(APPROOT+'/children?$select=name');
   if(!r.ok) throw new Error('Could not list the OneDrive folder');
   const data=await r.json();
   return (data.value||[]).map(f=>f.name);
@@ -665,7 +636,6 @@ async function syncNow(){
   if(!token) return toast('Connect OneDrive under Setup first');
   showSyncStatus('Syncing…');
   try{
-    syncFolder=await resolveSyncFolder();
     await ensureSyncKey(state.syncPassphrase);
     const remoteNames=await listFiles();
     const remoteBoxCodes=remoteNames.filter(n=>n.endsWith('.box.json')).map(n=>n.replace('.box.json',''));

@@ -66,21 +66,23 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
 
 ## Syncing two phones (OneDrive)
 
-Not usable yet without one setup step: register a free app at
-[portal.azure.com](https://portal.azure.com) (App registrations → New
-registration → account type "personal Microsoft accounts", redirect URI =
-this site's URL as an SPA, add the `Files.ReadWrite` Graph permission), then
-replace `MS_CLIENT_ID` near the top of the sync code in `index.html` with
-the client ID it gives you. No cost, no client secret needed.
+Setup is a one-time thing, already done for this deployment: an Azure app
+registration (personal Microsoft accounts, SPA redirect URI, the narrow
+`Files.ReadWrite.AppFolder` Graph permission — not the broader
+`Files.ReadWrite`) with its client ID wired into `MS_CLIENT_ID` in
+`index.html`. No cost, no client secret.
 
-Once that's done, on Setup:
+On each phone, under Setup:
 1. Set a **sync passphrase** — the same one on both phones. It encrypts
    everything before it ever reaches OneDrive, so OneDrive only ever holds
    unreadable bytes. Put it in a password manager: if it's lost, whatever
    synced under it is unrecoverable, by design.
-2. **Connect OneDrive** — signs into your own personal Microsoft account.
-   Each of you uses your own account; share the `WhatsInTheBox` folder
-   OneDrive creates from one account to the other, the normal OneDrive way.
+2. **Connect OneDrive** — sign into the **same dedicated Microsoft
+   account** on both phones (not your own personal one). That's what
+   makes the narrow `Files.ReadWrite.AppFolder` scope possible — the app
+   can only ever reach its own folder, and there's nothing else in that
+   account to reach anyway. No folder-sharing step needed; both phones
+   are automatically looking at the same app folder.
 3. **Sync now** whenever you want the two catalogues to merge. It also
    fetches on its own each time the app is opened with a connection.
 

@@ -32,6 +32,7 @@ Personal project, one install per household. Target device is a phone browser
 | iCloud rejected for sync | No usable API for a web app. CloudKit JS needs a developer container. OneDrive via Microsoft Graph is the intended path. |
 | No MSAL.js for OneDrive auth; hand-rolled OAuth2 Authorization Code + PKCE instead | MSAL's CDN build stopped at v2 - Microsoft's own docs say v3+ requires a package manager or bundler, which breaks the no-build-step rule. The hand-rolled flow is ~80 lines of `fetch` + Web Crypto, and keeps every byte of auth state in the `settings` IndexedDB store instead of needing `localStorage` for a token cache. |
 | Sync stores the passphrase, never uploads it; OneDrive only ever sees encrypted bytes | Privacy was the explicit priority when this was designed. A lost passphrase makes synced data permanently unrecoverable - that's the deliberate cost, not a bug. |
+| Both phones share one dedicated Microsoft account for sync, not two personal accounts | First built against two separate personal accounts, needing the broad `Files.ReadWrite` scope so the non-owner phone could reach a folder shared from the other's account. That scope reaches the *entire* OneDrive, including anything unrelated already stored there - reconsidered once that was fully understood. One dedicated account (`frozenfas.apps@outlook.com`), used for nothing else, lets the app request the narrow `Files.ReadWrite.AppFolder` scope instead. Traded a shared login for meaningfully less access. |
 | Houses are the top-level entity, above boxes | Two phones (iPhone + Android) already mean two isolated IndexedDBs with no sync. Houses give the eventual sync (OneDrive roadmap item) a natural partition, and let one install hold more than one household's boxes without redesigning the schema. No switcher UI yet — one house is created automatically, renamed under Setup. |
 | `DB_VER` only ever increases; migrations are additive | The catalogue is the only copy of months of packing data on someone's phone. See "Data model versioning" below — this is the pattern every future schema change must follow. |
 
@@ -101,50 +102,47 @@ loft. The upgrade has to run itself, the next time the app happens to open.
 
 ## Sync (OneDrive)
 
-Two phones, two separate personal Microsoft accounts, one shared OneDrive
-folder (`WhatsInTheBox`). The app never manages sharing itself - that's a
-one-time manual step in OneDrive's own UI, not something this codebase
-automates. The sequence has to happen in this order:
+Both phones sign into **the same dedicated Microsoft account**
+(`frozenfas.apps@outlook.com`), not two separate personal accounts. That
+one decision is what makes everything else about this simple:
 
-1. One person (whoever connects and syncs *first*) becomes the owner -
-   the first successful sync auto-creates `WhatsInTheBox` in their own
-   OneDrive root, since nobody has anything to share yet at that point.
-2. That person then shares the folder with the other's account the
-   normal OneDrive way (onedrive.com or the OneDrive app - right-click
-   the folder, Share, enter the other person's email, grant edit access).
-3. Only *after* that share exists should the second phone connect and
-   sync. `resolveSyncFolder()` in `index.html` checks the account's own
-   drive root first, then falls back to `/me/drive/sharedWithMe` - if
-   the second phone syncs *before* step 2, it finds nothing in either
-   place and creates its own separate `WhatsInTheBox`, silently
-   disconnected from the first one. Order matters and there's no
-   detection for getting it wrong.
+- The OAuth scope is the narrow `Files.ReadWrite.AppFolder`, not full
+  `Files.ReadWrite`. The app can only ever touch its own dedicated
+  OneDrive folder (`/me/drive/special/approot` in Graph terms) - nothing
+  else in the account, and there's nothing else in the account anyway
+  since it holds nothing but this app's data.
+- No manual "share this folder with the other person" step. Both phones
+  are "the owner" of the same account's app folder, so there's no
+  cross-account sharing to set up or get the ordering wrong on - the
+  whole owner-vs-shared-with-me problem an earlier version of this had
+  to solve doesn't exist here.
+- The tradeoff, already made deliberately: a genuinely shared login
+  between two people, rather than each keeping their own account. See
+  the decisions table above for why that was chosen over the broader
+  `Files.ReadWrite` scope on two separate accounts - the narrower scope
+  was judged worth a shared password once it became clear that scope
+  would otherwise reach the *entire* OneDrive, including anything
+  unrelated already stored there.
 
-Why the code has to branch on this at all: Microsoft Graph addresses a
-folder you own (`/me/drive/root:/WhatsInTheBox`) completely differently
-from one shared to you (`/drives/{driveId}/items/{itemId}`, found via
-`sharedWithMe`). `resolveSyncFolder()` resolves either case to the same
-`{driveId,itemId}` pair up front, and every other sync function addresses
-the folder through that, so it works the same regardless of which side
-of the share a given phone is on. This was found and fixed during
-testing (a mocked two-account round-trip), not caught by chance.
-
-Everything that reaches OneDrive is encrypted client-side first - see the
-`/* ---------------- encryption ---------------- */` and
-`/* ---------------- OneDrive sync ---------------- */` sections in
+Everything that reaches OneDrive is encrypted client-side first
+regardless - see the `/* ---------------- encryption ---------------- */`
+and `/* ---------------- OneDrive sync ---------------- */` sections in
 `index.html` for the actual code and their own inline reasoning.
 
 **Status: configured, not yet tested live.** `MS_CLIENT_ID` in `index.html`
 is a real Azure app registration (personal Microsoft accounts only,
-`consumers` authority, SPA redirect URI, `Files.ReadWrite` delegated
-scope). The authorize request was confirmed to redirect cleanly to
-Microsoft's real personal-account sign-in page with the right parameters
-carried through - as far as this can be checked without actually
-completing a login, which needs a real device and a real account.
-Everything that doesn't require live OAuth was verified directly:
-encryption round-trips, a wrong passphrase correctly fails closed instead
-of overwriting good remote data, and a full push-then-pull cycle was
-tested against a mocked Graph API.
+`consumers` authority, SPA redirect URI). The Azure app's API permissions
+need `Files.ReadWrite.AppFolder`, not the broader `Files.ReadWrite` used
+in an earlier version of this - if this is ever revisited, check the
+Azure portal's API permissions blade matches `MS_SCOPES` in `index.html`.
+The authorize request was confirmed to redirect cleanly to Microsoft's
+real sign-in page with correct parameters carried through - as far as
+this can be checked without completing an actual login, which needs a
+real device and account. Everything that doesn't require live OAuth was
+verified directly: encryption round-trips, a wrong passphrase correctly
+fails closed instead of overwriting good remote data, and a full
+push-then-pull cycle was tested against a mocked Graph API using the
+`special/approot` addressing.
 
 **Known limitations, deliberately scoped this way for v1, not oversights:**
 - **Deletions don't sync.** Pulling a box only adds or updates items by
