@@ -501,8 +501,8 @@ const decryptJson=async payload=>JSON.parse(await decryptText(payload));
  * and Web Crypto, both already used elsewhere here, and it means every
  * byte of auth state can live in the `settings` IndexedDB store rather
  * than needing localStorage just for a token cache. */
-const MS_CLIENT_ID='REPLACE_WITH_AZURE_APP_CLIENT_ID';
-const MS_AUTHORITY='https://login.microsoftonline.com/common/oauth2/v2.0';
+const MS_CLIENT_ID='42762842-c9da-4c57-b2d0-29be1fdcb08b';
+const MS_AUTHORITY='https://login.microsoftonline.com/consumers/oauth2/v2.0';
 const MS_SCOPES='Files.ReadWrite offline_access';
 const MS_REDIRECT=location.origin+location.pathname;
 

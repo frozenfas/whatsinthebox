@@ -109,15 +109,17 @@ encrypted client-side first - see the `/* ---------------- encryption
 ---------------- */` sections in `index.html` for the actual code and
 their own inline reasoning.
 
-**Status: built, not yet configured or tested live.** `MS_CLIENT_ID` in
-`index.html` is a placeholder - sync cannot work until it's replaced with
-a real Azure app registration's client ID (SPA redirect URI, `Files.ReadWrite`
-delegated scope, "personal Microsoft accounts" supported). Everything
-that doesn't require live OAuth was verified directly: encryption
-round-trips, a wrong passphrase correctly fails closed instead of
-overwriting good remote data, and a full push-then-pull cycle was tested
-against a mocked Graph API. The actual OAuth redirect flow needs a real
-device and a real Microsoft login to verify - untested until that happens.
+**Status: configured, not yet tested live.** `MS_CLIENT_ID` in `index.html`
+is a real Azure app registration (personal Microsoft accounts only,
+`consumers` authority, SPA redirect URI, `Files.ReadWrite` delegated
+scope). The authorize request was confirmed to redirect cleanly to
+Microsoft's real personal-account sign-in page with the right parameters
+carried through - as far as this can be checked without actually
+completing a login, which needs a real device and a real account.
+Everything that doesn't require live OAuth was verified directly:
+encryption round-trips, a wrong passphrase correctly fails closed instead
+of overwriting good remote data, and a full push-then-pull cycle was
+tested against a mocked Graph API.
 
 **Known limitations, deliberately scoped this way for v1, not oversights:**
 - **Deletions don't sync.** Pulling a box only adds or updates items by
@@ -168,10 +170,10 @@ the install prompt works without any certificate.
 
 ## Roadmap, in order
 
-1. Configure and live-test OneDrive sync (see Sync above) - it's built, it
-   just hasn't been pointed at a real Azure app registration or tried on
-   real devices yet. After that: proper deletion tombstones and box-code
-   collision handling, the two known gaps called out above.
+1. Live-test OneDrive sync on both phones (see Sync above) - it's built
+   and configured, just not yet tried with a real login on a real device.
+   After that: proper deletion tombstones and box-code collision
+   handling, the two known gaps called out above.
 2. Scan a printed label to jump to that box's contents. Needs jsQR, since
    Safari has no `BarcodeDetector`.
 3. Edit an item's fields after identification. Currently delete-only.
