@@ -520,7 +520,7 @@ async function connectOneDrive(){
   url.search=new URLSearchParams({
     client_id:MS_CLIENT_ID, response_type:'code', redirect_uri:MS_REDIRECT,
     scope:MS_SCOPES, code_challenge:challenge, code_challenge_method:'S256',
-    response_mode:'query'
+    response_mode:'query', prompt:'login'
   });
   location.href=url.toString();
 }
