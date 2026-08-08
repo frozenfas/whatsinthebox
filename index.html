@@ -582,29 +582,55 @@ async function graphFetch(path, opts={}){
   if(!token) throw new Error('Not connected to OneDrive');
   return fetch(GRAPH+path, {...opts, headers:{...(opts.headers||{}), Authorization:'Bearer '+token}});
 }
-async function ensureSyncFolder(){
-  const check=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER));
-  if(check.ok) return;
-  if(check.status!==404) throw new Error('OneDrive folder check failed ('+check.status+')');
+// The two phones use two different personal accounts, so only ONE of them
+// owns the WhatsInTheBox folder in their own drive root - the other sees
+// it as a shared item, which the Graph API addresses completely
+// differently (/drives/{driveId}/items/{itemId}, not /me/drive/root:/...).
+// resolveSyncFolder figures out which case applies and returns a
+// {driveId,itemId} pair that every other function below addresses
+// uniformly, so it works correctly on both phones regardless of who
+// created the folder.
+let syncFolder=null;
+async function resolveSyncFolder(){
+  const own=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER));
+  if(own.ok){
+    const d=await own.json();
+    return {driveId:d.parentReference.driveId, itemId:d.id};
+  }
+  if(own.status!==404) throw new Error('OneDrive folder check failed ('+own.status+')');
+
+  const shared=await graphFetch('/me/drive/sharedWithMe');
+  if(shared.ok){
+    const d=await shared.json();
+    const match=(d.value||[]).find(it=>it.name===SYNC_FOLDER && it.remoteItem);
+    if(match) return {driveId:match.remoteItem.parentReference.driveId, itemId:match.remoteItem.id};
+  }
+
+  // Nobody has created it yet on either side - this device becomes the
+  // owner. Whoever syncs first each new "first ever" folder; after that,
+  // share it with the other phone's account the normal OneDrive way.
   const create=await graphFetch('/me/drive/root/children', {
     method:'POST', headers:{'content-type':'application/json'},
     body:JSON.stringify({name:SYNC_FOLDER, folder:{}, '@microsoft.graph.conflictBehavior':'rename'})
   });
   if(!create.ok) throw new Error('Could not create the OneDrive folder');
+  const d=await create.json();
+  return {driveId:d.parentReference.driveId, itemId:d.id};
 }
+function folderBase(){ return '/drives/'+syncFolder.driveId+'/items/'+syncFolder.itemId; }
 async function getFile(name){
-  const r=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER)+'/'+encodeURIComponent(name)+':/content');
+  const r=await graphFetch(folderBase()+':/'+encodeURIComponent(name)+':/content');
   if(r.status===404) return null;
   if(!r.ok) throw new Error('Could not download '+name);
   return r.text();
 }
 async function putFile(name, text){
-  const r=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER)+'/'+encodeURIComponent(name)+':/content',
+  const r=await graphFetch(folderBase()+':/'+encodeURIComponent(name)+':/content',
     {method:'PUT', headers:{'content-type':'text/plain'}, body:text});
   if(!r.ok) throw new Error('Could not upload '+name);
 }
 async function listFiles(){
-  const r=await graphFetch('/me/drive/root:/'+encodeURIComponent(SYNC_FOLDER)+':/children?$select=name');
+  const r=await graphFetch(folderBase()+'/children?$select=name');
   if(!r.ok) throw new Error('Could not list the OneDrive folder');
   const data=await r.json();
   return (data.value||[]).map(f=>f.name);
@@ -639,7 +665,7 @@ async function syncNow(){
   if(!token) return toast('Connect OneDrive under Setup first');
   showSyncStatus('Syncing…');
   try{
-    await ensureSyncFolder();
+    syncFolder=await resolveSyncFolder();
     await ensureSyncKey(state.syncPassphrase);
     const remoteNames=await listFiles();
     const remoteBoxCodes=remoteNames.filter(n=>n.endsWith('.box.json')).map(n=>n.replace('.box.json',''));

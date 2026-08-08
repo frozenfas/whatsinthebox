@@ -102,12 +102,37 @@ loft. The upgrade has to run itself, the next time the app happens to open.
 ## Sync (OneDrive)
 
 Two phones, two separate personal Microsoft accounts, one shared OneDrive
-folder (`WhatsInTheBox`) that one of them creates and shares with the
-other the normal OneDrive way. Everything that reaches OneDrive is
-encrypted client-side first - see the `/* ---------------- encryption
----------------- */` and `/* ---------------- OneDrive sync
----------------- */` sections in `index.html` for the actual code and
-their own inline reasoning.
+folder (`WhatsInTheBox`). The app never manages sharing itself - that's a
+one-time manual step in OneDrive's own UI, not something this codebase
+automates. The sequence has to happen in this order:
+
+1. One person (whoever connects and syncs *first*) becomes the owner -
+   the first successful sync auto-creates `WhatsInTheBox` in their own
+   OneDrive root, since nobody has anything to share yet at that point.
+2. That person then shares the folder with the other's account the
+   normal OneDrive way (onedrive.com or the OneDrive app - right-click
+   the folder, Share, enter the other person's email, grant edit access).
+3. Only *after* that share exists should the second phone connect and
+   sync. `resolveSyncFolder()` in `index.html` checks the account's own
+   drive root first, then falls back to `/me/drive/sharedWithMe` - if
+   the second phone syncs *before* step 2, it finds nothing in either
+   place and creates its own separate `WhatsInTheBox`, silently
+   disconnected from the first one. Order matters and there's no
+   detection for getting it wrong.
+
+Why the code has to branch on this at all: Microsoft Graph addresses a
+folder you own (`/me/drive/root:/WhatsInTheBox`) completely differently
+from one shared to you (`/drives/{driveId}/items/{itemId}`, found via
+`sharedWithMe`). `resolveSyncFolder()` resolves either case to the same
+`{driveId,itemId}` pair up front, and every other sync function addresses
+the folder through that, so it works the same regardless of which side
+of the share a given phone is on. This was found and fixed during
+testing (a mocked two-account round-trip), not caught by chance.
+
+Everything that reaches OneDrive is encrypted client-side first - see the
+`/* ---------------- encryption ---------------- */` and
+`/* ---------------- OneDrive sync ---------------- */` sections in
+`index.html` for the actual code and their own inline reasoning.
 
 **Status: configured, not yet tested live.** `MS_CLIENT_ID` in `index.html`
 is a real Azure app registration (personal Microsoft accounts only,
