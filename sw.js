@@ -1,4 +1,4 @@
-const CACHE = 'witb-v15';
+const CACHE = 'witb-v16';
 const ASSETS = ['./', './index.html', './qrcode.js', './manifest.json', './icon-192.png'];
 
 self.addEventListener('install', e => {

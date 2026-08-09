@@ -93,12 +93,21 @@ heuristic (a book with very few known editions on Open Library, `editionCount
 appraisal, both are free, and genuine valuation stays a human step, same
 answer as the paintings/antiques case in the roadmap below.
 
-`item.coin` (`{n, title, issuer, minYear, maxYear, thumbnail, url}` or
-`null`) is the same additive pattern as `item.book`, fetched from Numista
-by title when `category` comes back `"coin"`. Numista's Terms of Use
-require the N# catalogue number and "Source: Numista" shown alongside any
-result derived from their data - `renderResults()` always renders both,
-not optionally. If the automatic text search doesn't match, the item has
+`item.coin` (`{n, title, issuer, minYear, maxYear, thumbnail,
+reverseThumbnail, url}` or `null`) is the same additive pattern as
+`item.book`, fetched from Numista by title when `category` comes back
+`"coin"`. Numista's Terms of Use require the N# catalogue number and
+"Source: Numista" shown alongside any result derived from their data -
+`renderResults()` always renders both, not optionally, and now renders
+the N# as an actual link to `item.coin.url` (`https://en.numista.com/{id}`
+- confirmed live, not guessed: the API itself returns no URL field, and
+the more obvious `/catalogue/pieces{id}.html` form 403s under a
+non-browser user-agent and only reveals itself as a redirect to the short
+form under a real one). `thumbnail`/`reverseThumbnail` (the API returns
+both, unprompted) render next to that line specifically so the user can
+visually confirm a text-only match is actually the right coin before
+trusting it, rather than having to click through to Numista's own site
+to check. If the automatic text search doesn't match, the item has
 no `coin` field and sits in the pool `runImageSearchBatch()` (Setup tab,
 "Run image search on unmatched coins") can search by photo instead, one
 paid batch call per coin, cost shown and confirmed before it runs - see

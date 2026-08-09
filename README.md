@@ -113,7 +113,11 @@ something is actually worth.
 
 Anything identified as a coin gets an automatic, free lookup against
 Numista by title, shown under the item with its Numista catalogue number
-(N#) and a link back to Numista, as their terms require. Add a free
+(N#, a clickable link back to the real Numista page) as their terms
+require — plus Numista's own photo of that catalogue entry, shown right
+there, so a text-only match can be visually checked at a glance rather
+than trusted blind or clicked through to confirm. If it doesn't look
+right, that's what the image search batch (below) is for. Add a free
 Numista API key under Setup, "Coin lookup", to turn this on — no key,
 no automatic lookup.
 

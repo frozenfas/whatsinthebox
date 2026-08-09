@@ -1189,6 +1189,7 @@ async function lookupCoin(title){
       minYear:t.min_year??null,
       maxYear:t.max_year??null,
       thumbnail:t.obverse_thumbnail||null,
+      reverseThumbnail:t.reverse_thumbnail||null,
       url:'https://en.numista.com/'+t.id
     };
   }catch(e){ return null; }
@@ -1333,7 +1334,12 @@ async function renderResults(){
       <h3>${esc(i.title)}</h3>
       ${i.visible_text?`<p>“${esc(i.visible_text)}”</p>`:''}
       ${i.book?`<p>${esc(i.book.author||'Unknown author')}${i.book.year?' · '+i.book.year:''} <span style="color:var(--muted)">(Open Library)</span></p>`:''}
-      ${i.coin?`<p>${esc(i.coin.issuer||'Unknown issuer')}${i.coin.minYear?' · '+i.coin.minYear+(i.coin.maxYear&&i.coin.maxYear!==i.coin.minYear?'–'+i.coin.maxYear:''):''} <span style="color:var(--muted)">(N#${i.coin.n} · Source: Numista)</span></p>`:''}
+      ${i.coin?`<p>${esc(i.coin.issuer||'Unknown issuer')}${i.coin.minYear?' · '+i.coin.minYear+(i.coin.maxYear&&i.coin.maxYear!==i.coin.minYear?'–'+i.coin.maxYear:''):''} <span style="color:var(--muted)">(<a href="${esc(i.coin.url)}" target="_blank" rel="noopener">N#${i.coin.n}</a> · Source: Numista)</span></p>
+      ${i.coin.thumbnail||i.coin.reverseThumbnail?`<div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+        <span style="font-size:11px;color:var(--muted)">Numista's photo, check it's really this coin:</span>
+        ${i.coin.thumbnail?`<img src="${esc(i.coin.thumbnail)}" alt="" loading="lazy" style="width:32px;height:32px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">`:''}
+        ${i.coin.reverseThumbnail?`<img src="${esc(i.coin.reverseThumbnail)}" alt="" loading="lazy" style="width:32px;height:32px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">`:''}
+      </div>`:''}`:''}
       ${worthLook(i)?`<p style="color:var(--warn)">Worth a look: ${esc(worthLook(i))}</p>`:''}
       <div class="meta">
         <span class="chip" style="background:${boxChip[i.box]||'#F5C400'}">${esc(i.box)}</span>
