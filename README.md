@@ -119,7 +119,10 @@ there, so a text-only match can be visually checked at a glance rather
 than trusted blind or clicked through to confirm. If it doesn't look
 right, that's what the image search batch (below) is for. Add a free
 Numista API key under Setup, "Coin lookup", to turn this on — no key,
-no automatic lookup.
+no automatic lookup. If a coin was identified *before* the key was
+added, it won't have a match yet either — a **"Retry coin lookup"**
+button appears on any coin item missing one, and just re-runs the free
+search using the title Claude already gave it, no new photo needed.
 
 If the text search doesn't find a match, it just stays unmatched — there's
 no automatic image fallback, because Numista's image-search endpoint needs

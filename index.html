@@ -1359,12 +1359,32 @@ async function renderResults(){
         ${i.state!=='done'?'<span class="pill">not identified</span>':''}
       </div>
       ${i.category==='book' && !i.book && i.state==='done'?`<button data-isbn="${i.id}" style="margin-top:8px">Photograph copyright page</button>`:''}
+      ${i.category==='coin' && !i.coin && i.state==='done'?`<button data-retrycoin="${i.id}" style="margin-top:8px">Retry coin lookup</button>`:''}
       ${i.category==='coin' && !i.full2 && i.state==='done'?`<button data-coinside="${i.id}" style="margin-top:8px">+ Add other side</button>`:''}
     </div>
     <button data-del="${i.id}" data-delbox="${esc(i.box)}" class="danger" aria-label="Delete">✕</button>
   </div></div>`).join('');
   $('results').querySelectorAll('[data-isbn]').forEach(b=>b.onclick=()=>{ isbnTargetId=Number(b.dataset.isbn); $('isbnShot').click(); });
   $('results').querySelectorAll('[data-coinside]').forEach(b=>b.onclick=()=>{ coinSideTargetId=Number(b.dataset.coinside); $('coinSideShot').click(); });
+  // Free, no photo, no Claude call - just re-runs the Numista text search
+  // against the title Claude already gave the item. Exists specifically
+  // for items identified as coins before a Numista key was ever added:
+  // lookupCoin() silently returns null with no key, so those items sat
+  // with no coin match and no visible reason why, with no way to fix it
+  // short of a full re-identification.
+  $('results').querySelectorAll('[data-retrycoin]').forEach(b=>b.onclick=async()=>{
+    const id=Number(b.dataset.retrycoin);
+    if(!state.numistaKey) return toast('Add a Numista API key under Setup first');
+    const item=await get('items',id);
+    if(!item) return;
+    toast('Searching Numista…');
+    const coin=await lookupCoin(item.title);
+    if(!coin) return toast('No match on Numista for "'+item.title+'"');
+    await put('items',{...item,coin,updated:Date.now()});
+    await touchBox(item.box);
+    renderResults();
+    toast('Found: '+(coin.title||coin.issuer||'a match'));
+  });
   $('results').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
     await del('items',Number(b.dataset.del)); await touchBox(b.dataset.delbox); renderResults(); toast('Deleted');
   });

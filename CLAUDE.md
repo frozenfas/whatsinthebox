@@ -112,7 +112,15 @@ no `coin` field and sits in the pool `runImageSearchBatch()` (Setup tab,
 "Run image search on unmatched coins") can search by photo instead, one
 paid batch call per coin, cost shown and confirmed before it runs - see
 the decisions table above for why this is manual and batched rather than
-automatic. `item.full2`/`item.thumb2` are an optional second photo, same
+automatic. A "Retry coin lookup" button (`renderResults()`, shown when
+`category==='coin' && !coin && state==='done'`) covers the other reason
+`coin` can be missing: the item was identified before a Numista key was
+ever saved, so `lookupCoin()` silently returned `null` with nothing to
+show and no visible reason why - a real thing that happened while
+building this. The button just re-runs `lookupCoin(item.title)` against
+the title Claude already produced - free, no new photo, no Claude call -
+rather than requiring a full re-identification to retry something that
+was never Claude's fault. `item.full2`/`item.thumb2` are an optional second photo, same
 shape as `full`/`thumb`, added after the fact via the "+ Add other side"
 button (`renderResults()`, coin items only, shown once `state==='done'`
 and no `full2` yet). One photo is always enough to save an item - this
