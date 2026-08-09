@@ -211,17 +211,49 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
 #sheet.copies-6 .name{font-size:9px}
 #sheet.copies-6 .line{font-size:8px}
 
-/* scale card - physically accurate mm, for sizing objects in photos */
-.scalecard{padding:10mm}
+/* scale card - physically accurate mm, for sizing objects in photos.
+   Two L-shaped corner rulers side by side, one per coin side, so a
+   single photo of a coin sitting in the corner reads its size directly
+   off both the horizontal and vertical edge at once - a plain linear
+   ruler laid next to an object only gives one axis. */
+.scalecard{padding:8mm}
 .scalecard h2{font-size:11px;font-weight:600;margin:0 0 3mm}
-.scalecard p{font-size:8px;color:#777;margin:0 0 8mm;font-family:var(--mono)}
-.ruler{position:relative;width:100mm;height:16mm}
-.ruler .baseline{position:absolute;left:0;right:0;bottom:5mm;height:0.3mm;background:#000}
-.ruler .tick{position:absolute;bottom:5mm;width:0.25mm;background:#000}
-.ruler .tick.major{height:6mm}
-.ruler .tick.minor{height:3.5mm}
-.ruler .tick.tiny{height:1.8mm}
-.ruler .label{position:absolute;bottom:11.5mm;font-size:7px;font-family:var(--mono);transform:translateX(-50%);color:#000}
+.scalecard p{font-size:8px;color:#777;margin:0 0 6mm;font-family:var(--mono)}
+.cornerrow{display:flex;gap:10mm;margin-top:6mm}
+/* STRIP (12mm) is the bar+tick+label band; LEN (70mm) is the ruled
+   length past it; BLOCK (82mm) = STRIP+LEN, and every offset below is
+   built from those same two numbers so the bar, ticks, and patch stay
+   aligned to one shared origin corner - if either changes, every
+   left/top/width/height here has to move with it. Two blocks (82mm)
+   plus the 10mm gap is 174mm, inside the 178mm actually available
+   (194mm #sheet content width minus .scalecard's own 8mm*2 padding -
+   easy to overflow by forgetting that second padding, so leave a few
+   mm of slack rather than sizing to exactly fill the budget). */
+.lblock{width:82mm}
+.lblock .side-label{font-size:9px;font-weight:700;margin:0 0 2mm;font-family:var(--mono)}
+.ruler-frame{position:relative;width:82mm;height:82mm}
+.ruler-frame .patch{position:absolute;left:12mm;top:12mm;width:40mm;height:40mm;border:0.3mm dotted #000;border-radius:50%}
+/* alternating black/grey segments, 10mm each, sit above the tick+number
+   row - a coarse scale readable at a glance, no need to read a number. */
+.hbar{position:absolute;top:0;left:12mm;width:70mm;height:12mm}
+.hbar .seg{position:absolute;top:0;height:3mm}
+.hbar .seg.blk{background:#000}
+.hbar .seg.gry{background:#999}
+.hbar .tick{position:absolute;top:3mm;width:0.25mm;background:#000}
+.hbar .tick.major{height:5mm}
+.hbar .tick.minor{height:3mm}
+.hbar .tick.tiny{height:1.5mm}
+.hbar .label{position:absolute;top:8.5mm;font-size:6px;font-family:var(--mono);transform:translateX(-50%)}
+.vbar{position:absolute;top:12mm;left:0;width:12mm;height:70mm}
+.vbar .seg{position:absolute;left:0;width:3mm}
+.vbar .seg.blk{background:#000}
+.vbar .seg.gry{background:#999}
+.vbar .tick{position:absolute;left:3mm;height:0.25mm;background:#000}
+.vbar .tick.major{width:5mm}
+.vbar .tick.minor{width:3mm}
+.vbar .tick.tiny{width:1.5mm}
+.vbar .label{position:absolute;left:8.5mm;font-size:6px;font-family:var(--mono);transform:translateY(-50%)}
+.scalecard .patchdefs{margin-top:6mm;font-size:8px;color:#555;font-family:var(--mono);line-height:1.6}
 </style>
 </head>
 <body>
@@ -963,21 +995,45 @@ async function printLabels(codes){
 $('printAll').onclick=async()=>{ const b=(await getAll('boxes')).filter(x=>x.house===state.house); printLabels(b.map(x=>x.code)); };
 $('copies').onchange=async e=>{ state.copies=Number(e.target.value); await put('settings',{k:'copies',v:state.copies}); };
 
-function buildRulerHtml(){
-  let ticks='';
-  for(let i=0;i<=100;i++){
-    const cls=i%10===0?'major':(i%5===0?'minor':'tiny');
-    ticks+=`<div class="tick ${cls}" style="left:${i}mm"></div>`;
-    if(i%10===0) ticks+=`<div class="label" style="left:${i}mm">${i}</div>`;
+const SCALE_STRIP=12, SCALE_LEN=70; // mm - see .ruler-frame comment in CSS
+function scaleTicks(len,axisProp){
+  let html='';
+  for(let i=0;i<=len;i++){
+    const isEnd=i===len;
+    const cls=(i%10===0||isEnd)?'major':(i%5===0?'minor':'tiny');
+    html+=`<div class="tick ${cls}" style="${axisProp}:${i}mm"></div>`;
+    if(i%10===0||isEnd) html+=`<div class="label" style="${axisProp}:${i}mm">${i}</div>`;
   }
-  return `<div class="ruler"><div class="baseline"></div>${ticks}</div>`;
+  return html;
+}
+function scaleSegs(len,axisProp,sizeProp){
+  let html='';
+  for(let i=0;i<len;i+=10){
+    const size=Math.min(10,len-i);
+    html+=`<div class="seg ${(i/10)%2===0?'blk':'gry'}" style="${axisProp}:${i}mm;${sizeProp}:${size}mm"></div>`;
+  }
+  return html;
+}
+function buildCornerBlock(label,sub){
+  return `<div class="lblock">
+    <div class="side-label">${esc(label)} <span style="font-weight:400;color:#777">- ${esc(sub)}</span></div>
+    <div class="ruler-frame">
+      <div class="hbar">${scaleSegs(SCALE_LEN,'left','width')}${scaleTicks(SCALE_LEN,'left')}</div>
+      <div class="vbar">${scaleSegs(SCALE_LEN,'top','height')}${scaleTicks(SCALE_LEN,'top')}</div>
+      <div class="patch"></div>
+    </div>
+  </div>`;
 }
 $('printScaleCard').onclick=()=>{
   $('sheet').className='';
   $('sheet').innerHTML=`<div class="scalecard">
     <h2>What's in the Box - photo scale reference</h2>
-    <p>0-100mm. Should measure exactly 100mm end to end - if it doesn't, reprint at Actual size, not Fit to page.</p>
-    ${buildRulerHtml()}
+    <p>Each ruler edge should measure exactly ${SCALE_LEN}mm - if it doesn't, reprint at Actual size, not Fit to page.</p>
+    <div class="cornerrow">
+      ${buildCornerBlock('OBVERSE','front / "heads"')}
+      ${buildCornerBlock('REVERSE','back / "tails"')}
+    </div>
+    <p class="patchdefs">Obverse is the coin's front - usually the main portrait or primary design, and the side that usually names the issuing country or authority. Reverse is the back - usually the denomination or a secondary design. Place the coin flush into the corner of its dotted circle so its edge lines up with both rulers, then read its width and height straight off the tick marks.</p>
   </div>`;
   setTimeout(()=>window.print(),120);
 };

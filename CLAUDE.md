@@ -42,7 +42,8 @@ Android Chrome also supported for install/camera/PWA).
 | "Box" renamed to "location" in the UI only; every internal name stays `box` | A location doesn't have to be a literal box - a shelf or cupboard works the same way. Renaming every function, variable, DB store name, and sync file naming convention (`{box.uid}.box.json`) to match would have meant re-touching most of an already-tested codebase for zero user-visible benefit. `CODE_PREFIX` (`'LOCATION-'`, 4-digit) controls the printed/displayed code; `boxes`/`createBox`/`item.box`/etc. are unchanged and mean the same thing they always did. Don't "fix" this inconsistency by renaming internals later without a real reason - it was a deliberate scope cut, not an oversight. |
 | Numista over Colnect for coin lookup | Numista has a real, documented, keyed API with CORS support, confirmed live from this deployment's origin. Colnect was checked directly against its own docs page and explicitly states `CORS: No` - a non-starter for a browser-only app with no proxy. |
 | Coin image search is a manual, cost-gated batch action, not automatic | Numista's `search_by_image` endpoint needs a paid plan (€100/month minimum), unlike the free text search used automatically on every coin. Automatic per-photo image search would be an ongoing €100/month for a personal project. Instead `runImageSearchBatch()` lets the paid plan be activated for one calendar month (Numista waives the minimum for that first month per their terms §6.7), run once against whatever backlog has built up, then cancelled - real cost becomes the one-time activation plus ~€0.03/coin, not a standing subscription. `confirm()` shows the real estimated cost before it runs. |
-| Scale card uses literal `mm` CSS units, same as the label sheet | Already proven physically accurate for printed labels at 96dpi-equivalent CSS mm. Reusing it for a 0-100mm ruler means the same `@page`/print pipeline and the same "print at Actual size" caveat, rather than a second unit system to get right. |
+| Scale card uses literal `mm` CSS units, same as the label sheet | Already proven physically accurate for printed labels at 96dpi-equivalent CSS mm. Reusing it for the ruler means the same `@page`/print pipeline and the same "print at Actual size" caveat, rather than a second unit system to get right. |
+| Scale card is two L-shaped corner rulers (one per coin side), not one linear ruler | A linear ruler laid next to an object only reads one axis; an L-shaped corner ruler, with the object placed flush into the corner, reads width and height from a single photo. Two of them, each framing a dotted "OBVERSE"/"REVERSE" placement circle, doubles as the obverse/reverse side-tracking the coin module needed - the printed label is what tells Claude which side it's looking at, since it's in the photo itself, not a separate data field. The alternating black/grey segment bar above each ruler's tick marks is a coarse, at-a-glance scale that doesn't require reading a number, sitting above the precise numbered ticks rather than replacing them. |
 
 ## Files
 
@@ -245,6 +246,21 @@ regardless of local printer defaults. If the row heights for `copies-2` /
 `copies-4` / `copies-6` (or the scale card's ruler) ever change, re-check
 that `rows * row-height <= 281mm` (297mm page - 16mm sheet padding) before
 shipping - that's the actual budget, not 297mm.
+
+The scale card's width budget is easy to get wrong the same way, because
+of the page's global `*{box-sizing:border-box}` reset: `#sheet` has no
+explicit `width` (so its content box is genuinely `210 - 2*8mm = 194mm`,
+box-sizing doesn't affect an `auto` width), but `.scalecard` also fills
+that 194mm as its own *outer* box and then loses its own `8mm*2` padding
+from that before anything inside it gets to use the rest - the real
+budget for `.cornerrow`'s contents is `194 - 16 = 178mm`, not 194mm. The
+two `.lblock` corner rulers (`82mm` each, `10mm` gap = `174mm`) fit that
+178mm budget with 4mm to spare - if `SCALE_LEN`/`SCALE_STRIP` in
+`index.html` or the `.lblock` width in CSS ever change, re-derive this
+the same way (subtract *every* nested element's own padding once, in
+order, from the outside in) rather than assuming one padding subtraction
+covers it - this was miscounted more than once while building it and
+only caught by measuring the rendered layout, not by re-reading the CSS.
 
 ## Reset & backup
 

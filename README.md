@@ -125,11 +125,17 @@ cancel or downgrade before the next billing month.
 
 ## Photo scale card
 
-Setup, "Photo scale card" — prints a 0–100mm ruler to lay behind an
-object before photographing it, so its size can be read precisely from
-the photo instead of guessed. Especially useful for coins, where size
-often distinguishes two similar-looking ones. Print it once and reuse it.
-Same "Actual size, not Fit to page" rule as the labels applies.
+Setup, "Photo scale card" — prints two L-shaped corner rulers side by
+side, one labelled **OBVERSE** (front/"heads") and one **REVERSE**
+(back/"tails"), each framing a dotted circle to place a coin in. A
+corner ruler reads width *and* height from one photo, unlike a single
+ruler laid alongside an object which only gives one axis, and the
+alternating black/grey bar above each ruler's numbers gives a
+size at a glance without reading them. Photograph the coin in the
+correctly labelled patch for each side — the printed label itself is
+what tells Claude which side it's looking at, since it's right there in
+the photo. Print it once and reuse it. Same "Actual size, not Fit to
+page" rule as the labels applies.
 
 ## Syncing two phones (OneDrive)
 
