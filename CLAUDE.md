@@ -44,6 +44,7 @@ Android Chrome also supported for install/camera/PWA).
 | Coin image search is a manual, cost-gated batch action, not automatic | Numista's `search_by_image` endpoint needs a paid plan (€100/month minimum), unlike the free text search used automatically on every coin. Automatic per-photo image search would be an ongoing €100/month for a personal project. Instead `runImageSearchBatch()` lets the paid plan be activated for one calendar month (Numista waives the minimum for that first month per their terms §6.7), run once against whatever backlog has built up, then cancelled - real cost becomes the one-time activation plus ~€0.03/coin, not a standing subscription. `confirm()` shows the real estimated cost before it runs. |
 | Scale card uses literal `mm` CSS units, same as the label sheet | Already proven physically accurate for printed labels at 96dpi-equivalent CSS mm. Reusing it for the ruler means the same `@page`/print pipeline and the same "print at Actual size" caveat, rather than a second unit system to get right. |
 | Scale card is two L-shaped corner rulers (one per coin side), not one linear ruler | A linear ruler laid next to an object only reads one axis; an L-shaped corner ruler, with the object placed flush into the corner, reads width and height from a single photo. Two of them, each framing a dotted "OBVERSE"/"REVERSE" placement circle, doubles as the obverse/reverse side-tracking the coin module needed - the printed label is what tells Claude which side it's looking at, since it's in the photo itself, not a separate data field. The alternating black/grey segment bar above each ruler's tick marks is a coarse, at-a-glance scale that doesn't require reading a number, sitting above the precise numbered ticks rather than replacing them. |
+| A second photo is opt-in, added after the fact, not a required second capture step | A coin's date or mint mark can end up on either face, so one photo is routinely not enough to be sure - but making every capture a two-photo step would slow down the fast one-tap-per-object flow the whole app is built around, for every category, not just coins. `full2`/`thumb2` stay `undefined` unless the user deliberately taps "+ Add other side" afterwards. |
 
 ## Files
 
@@ -59,9 +60,9 @@ Android Chrome also supported for install/camera/PWA).
 houses   { id, uid, name, created, updated }                 keyPath: id (auto)
 boxes    { code: "BOX-001", uid, name, created, updated,      keyPath: code
            sealed, house, chip, enteredBy }                   index: house
-items    { id, uid, box, full, thumb, state, created,         keyPath: id (auto)
-           updated, title, category, material, colour,        indexes: box, state
-           approx_size_cm, visible_text, condition,
+items    { id, uid, box, full, thumb, full2, thumb2, state,   keyPath: id (auto)
+           created, updated, title, category, material,       indexes: box, state
+           colour, approx_size_cm, visible_text, condition,
            rarity_notes, book, coin, tags[], confidence }
 settings { k, v }                                              keyPath: k
 ```
@@ -102,7 +103,16 @@ no `coin` field and sits in the pool `runImageSearchBatch()` (Setup tab,
 "Run image search on unmatched coins") can search by photo instead, one
 paid batch call per coin, cost shown and confirmed before it runs - see
 the decisions table above for why this is manual and batched rather than
-automatic. The response shape for `search_by_image` was not verified
+automatic. `item.full2`/`item.thumb2` are an optional second photo, same
+shape as `full`/`thumb`, added after the fact via the "+ Add other side"
+button (`renderResults()`, coin items only, shown once `state==='done'`
+and no `full2` yet). One photo is always enough to save an item - this
+is opt-in, not a second required step in the capture flow, which stays
+exactly as fast as it was. Adding the second photo calls
+`classify(id, true)` - the `force` param lets an already-`done` item be
+re-sent, this time with both images in one message, so Claude can use
+whichever face actually has the date/mint mark/condition detail rather
+than guessing from one side. The response shape for `search_by_image` was not verified
 against a real paid-plan account (the free plan returns 403
 `NOT_ENTITLED`) - `searchCoinByImage()` in `index.html` is flagged
 in-code as a best-effort guess at the shape, to be corrected the first
@@ -261,6 +271,19 @@ the same way (subtract *every* nested element's own padding once, in
 order, from the outside in) rather than assuming one padding subtraction
 covers it - this was miscounted more than once while building it and
 only caught by measuring the rendered layout, not by re-reading the CSS.
+
+`#sheet, #sheet *{print-color-adjust:exact}` (plus the `-webkit-` prefix
+for Safari) is there because browsers silently drop `background-color`
+from printed pages by default, to save ink, regardless of what the
+print dialog's own "Background graphics" toggle happens to be set to -
+with no warning and no visual difference on screen. Without it, the
+label's colour bar and the scale card's alternating segments both print
+blank. This was a real bug (found by actually printing, not by
+inspecting the page on screen - the two look identical) that predates
+the scale card; the label's colour bar had almost certainly always had
+it. Anything added to `#sheet` in future that depends on a background
+colour to be legible needs this rule in scope, not a fresh one per
+element.
 
 ## Reset & backup
 

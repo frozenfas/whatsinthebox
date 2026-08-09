@@ -186,6 +186,14 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
      print margin on top of #sheet's own 8mm padding, and that doubled-up
      margin is what pushed a normal 2-row sheet onto a second page. */
   @page{size:A4 portrait;margin:0}
+  /* Browsers drop background colours from print output by default
+     (to save ink) unless told otherwise - silently, with no warning,
+     and independent of whatever "Background graphics" checkbox the
+     print dialog happens to default to. Without this, the label's
+     colour bar and the scale card's alternating black/grey segments
+     both print blank. -webkit- prefix matters here specifically for
+     Safari, the primary target on iOS. */
+  #sheet, #sheet *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 /* One dotted line per cut, shared between neighbours rather than a
    frame round each label - simplest way to show where the scissors go. */
@@ -339,6 +347,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
     </div>
     <div id="results"></div>
     <input type="file" id="isbnShot" accept="image/*" capture="environment" style="display:none">
+    <input type="file" id="coinSideShot" accept="image/*" capture="environment" style="display:none">
   </section>
 
   <!-- ===== SETTINGS ===== -->
@@ -1243,11 +1252,19 @@ async function runImageSearchBatch(){
 }
 $('runImageSearch').onclick=runImageSearchBatch;
 
-async function classify(id){
+async function classify(id,force=false){
   const item=await get('items',id);
-  if(!item||item.state==='done') return;
+  if(!item||(item.state==='done' && !force)) return;
+  const prevState=item.state;
   await put('items',{...item,state:'working',updated:Date.now()});
   try{
+    const content=[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64(item.full)}}];
+    let prompt='Identify this object for a storage catalogue.';
+    if(item.full2){
+      content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64(item.full2)}});
+      prompt+=' Two photos of the same object are provided - if it is a coin, the second is most likely its other side (obverse/reverse); use both, since a date, mint mark, or condition detail can sit on either face.';
+    }
+    content.push({type:'text',text:prompt+' Return exactly this JSON shape:\n'+SCHEMA});
     const r=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{
@@ -1259,10 +1276,7 @@ async function classify(id){
       body:JSON.stringify({
         model:state.model, max_tokens:400,
         system:'You catalogue household objects being packed into storage. Reply with one JSON object and nothing else. No markdown, no code fences, no commentary. If unsure of a field use "unknown".',
-        messages:[{role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64(item.full)}},
-          {type:'text',text:'Identify this object for a storage catalogue. Return exactly this JSON shape:\n'+SCHEMA}
-        ]}]
+        messages:[{role:'user',content}]
       })
     });
     if(!r.ok){
@@ -1281,7 +1295,7 @@ async function classify(id){
     if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
     renderQueue();
   }catch(err){
-    await put('items',{...item,state:'pending'});
+    await put('items',{...item,state:prevState});
     toast(err.message);
   }
 }
@@ -1311,7 +1325,10 @@ async function renderResults(){
     return;
   }
   $('results').innerHTML=items.map(i=>`<div class="card"><div class="item">
-    <img src="${i.thumb}" alt="" loading="lazy">
+    <div style="display:flex;gap:4px">
+      <img src="${i.thumb}" alt="" loading="lazy">
+      ${i.thumb2?`<img src="${i.thumb2}" alt="" loading="lazy" style="border-radius:8px">`:''}
+    </div>
     <div class="body">
       <h3>${esc(i.title)}</h3>
       ${i.visible_text?`<p>“${esc(i.visible_text)}”</p>`:''}
@@ -1323,13 +1340,16 @@ async function renderResults(){
         ${boxHouse[i.box]?`<span class="pill">${esc(boxHouse[i.box])}</span>`:''}
         ${i.category?`<span class="pill">${esc(i.category)}</span>`:''}
         ${i.material?`<span class="pill">${esc(i.material)}</span>`:''}
+        ${i.thumb2?'<span class="pill">both sides</span>':''}
         ${i.state!=='done'?'<span class="pill">not identified</span>':''}
       </div>
       ${i.category==='book' && !i.book && i.state==='done'?`<button data-isbn="${i.id}" style="margin-top:8px">Photograph copyright page</button>`:''}
+      ${i.category==='coin' && !i.full2 && i.state==='done'?`<button data-coinside="${i.id}" style="margin-top:8px">+ Add other side</button>`:''}
     </div>
     <button data-del="${i.id}" data-delbox="${esc(i.box)}" class="danger" aria-label="Delete">✕</button>
   </div></div>`).join('');
   $('results').querySelectorAll('[data-isbn]').forEach(b=>b.onclick=()=>{ isbnTargetId=Number(b.dataset.isbn); $('isbnShot').click(); });
+  $('results').querySelectorAll('[data-coinside]').forEach(b=>b.onclick=()=>{ coinSideTargetId=Number(b.dataset.coinside); $('coinSideShot').click(); });
   $('results').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
     await del('items',Number(b.dataset.del)); await touchBox(b.dataset.delbox); renderResults(); toast('Deleted');
   });
@@ -1375,6 +1395,28 @@ $('isbnShot').onchange=async e=>{
     await touchBox(item.box);
     renderResults();
     toast('Found: '+book.title);
+  }catch(err){ toast(err.message); }
+};
+
+// Coins are the one category where a single photo is routinely not
+// enough - a date, mint mark, or condition detail can sit on either
+// face. One photo stays the default (nothing forces this), but this
+// lets the item's other side be added afterwards and re-sent to Claude
+// together with the first - see classify()'s `force` param.
+let coinSideTargetId=null;
+$('coinSideShot').onchange=async e=>{
+  const file=e.target.files[0]; e.target.value='';
+  const id=coinSideTargetId; coinSideTargetId=null;
+  if(!file || !id) return;
+  const item=await get('items', id);
+  if(!item) return;
+  try{
+    const [full2,thumb2]=await Promise.all([resize(file,1024,.85), resize(file,320,.7)]);
+    await put('items',{...item, full2, thumb2, updated:Date.now()});
+    await touchBox(item.box);
+    renderResults();
+    if(state.key){ toast('Re-identifying with both sides…'); await classify(id,true); renderResults(); }
+    else toast('Other side added');
   }catch(err){ toast(err.message); }
 };
 

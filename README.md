@@ -78,6 +78,10 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
    default margin) — if your printer's dialog offers a margin or scale
    option, leave it at **Default margins / Actual size**, not
    "Fit to page" or "Shrink to fit", or the label sizes will be off.
+   If a label's colour bar or the scale card's grey/black bar prints
+   blank, look for a **"Background graphics"** toggle in the print
+   dialog and turn it on — the app already asks for this in its CSS,
+   but a few browsers still require it set manually too.
 5. Capture tab: one object per photo as it goes in — only locations at
    the currently-selected house show up here, since you can't be
    physically standing at the other one.
@@ -122,6 +126,16 @@ unmatched coins has built up, not per-coin. Numista waives the €100
 monthly minimum for the first calendar month a paid plan is active, so
 the intended pattern is: activate the plan, run the batch once, then
 cancel or downgrade before the next billing month.
+
+A coin's date or mint mark can end up on either face, so one photo is
+routinely not enough — but capture stays one tap, one photo, exactly as
+fast as any other object. A coin item that's been identified gets a
+**"+ Add other side"** button on the Find tab: photograph the other
+face and Claude re-identifies the item using both photos together,
+rather than guessing from just the one it already had. Entirely
+optional — an item with just one photo works fine and nothing prompts
+you to add the second. Sending a second photo roughly doubles that
+item's identification cost, same as any extra image in the request.
 
 ## Photo scale card
 
