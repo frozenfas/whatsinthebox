@@ -121,14 +121,17 @@ material, etc.) same as anything else, with no coin match yet. Add a
 free Numista API key under Setup, "Coin lookup", to enable matching at
 all — no key, no lookup, ever.
 
-Right after taking a photo, the Capture tab offers **"+ Add another
-photo"** — flip the coin over and photograph the other face there and
-then, no need to switch tabs. The same button also appears on any coin
-item afterwards, on the Find tab. Either way, Claude re-identifies the
-item using both photos together, and about a second and a half later
-the Numista search runs on its own using that fuller picture. If you
-only ever take one photo, that's fine too — nothing forces a second —
-but it means no automatic match; tap **"Retry coin lookup"** (Find tab,
+Once a photo is identified as a coin, the Capture tab itself offers
+**"+ Add another photo"** — flip it over and photograph the other face
+there and then, no need to switch tabs. (The same prompt appears for a
+book too, useful for its copyright page; it's hidden for everything
+else, since most objects only ever need the one photo.) The same button
+also appears on any coin item afterwards, on the Find tab. Either way,
+Claude re-identifies the item using both photos together, and about a
+second and a half later the Numista search runs on its own using that
+fuller picture. If you only ever take one photo, that's fine too —
+nothing forces a second — but it means no automatic match; tap **"Retry
+coin lookup"** (Find tab,
 appears on any coin without one) whenever you want a search run on what
 you've got.
 

@@ -1109,14 +1109,6 @@ function cmToMm(cm){
   return Number.isFinite(n) ? (n*10).toFixed(1) : undefined;
 }
 
-// A short grace period before the item is actually sent for
-// identification, keyed by item id - so tapping "+ Add another photo"
-// right after capture (flipping a coin over, say) cancels this and lets
-// the two-photo identification from coinSideShot's handler be the only
-// API call that fires, rather than racing a single-photo one already
-// in flight. Purely a local timer, not a network wait, so it doesn't
-// slow down capturing the next object.
-const pendingClassify={};
 $('shot').onchange=async e=>{
   const file=e.target.files[0]; e.target.value='';
   if(!file) return;
@@ -1129,22 +1121,22 @@ $('shot').onchange=async e=>{
     await touchBox(item.box);
     showLast(item);
     renderQueue();
-    if(state.key) pendingClassify[id]=setTimeout(()=>{ delete pendingClassify[id]; classify(id); }, 1500);
+    if(state.key) classify(id);
   }catch(err){ toast(err.message); }
 };
 
+// "+ Add another photo" isn't shown here up front - most objects only
+// ever need one photo, and showing it for everything just adds noise
+// for the common case. classify()'s success path reveals it into
+// #lastAddSideWrap, only for categories where a second angle actually
+// helps (a coin's other side; a book's copyright page for the ISBN).
 function showLast(item){
-  $('lastAdded').innerHTML=`<div class="card"><div class="item">
+  $('lastAdded').innerHTML=`<div class="card" data-item-id="${item.id}"><div class="item">
     <img src="${item.thumb}" alt="">
     <div class="body"><h3 id="lastTitle">${esc(item.title)}</h3>
       <p id="lastSub">Saved to ${esc(item.box)}</p>
-      <button id="lastAddSide" style="margin-top:8px">+ Add another photo (e.g. a coin's other side)</button>
+      <div id="lastAddSideWrap"></div>
     </div></div></div>`;
-  $('lastAddSide').onclick=()=>{
-    if(pendingClassify[item.id]){ clearTimeout(pendingClassify[item.id]); delete pendingClassify[item.id]; }
-    coinSideTargetId=item.id;
-    $('coinSideShot').click();
-  };
 }
 
 async function renderQueue(){
@@ -1429,7 +1421,17 @@ async function classify(id,force=false){
     const latest=await get('items',id) || item;
     await put('items',{...latest,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book});
     await touchBox(item.box);
-    if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
+    // Only touch #lastAdded if it's still showing THIS item - the user
+    // may already have captured something else by the time this
+    // resolves, and #lastTitle's existence alone doesn't guarantee that.
+    if(String($('lastAdded').querySelector('[data-item-id]')?.dataset.itemId)===String(id)){
+      $('lastTitle').textContent=o.title;
+      $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box;
+      if(o.category==='coin'||o.category==='book'){
+        $('lastAddSideWrap').innerHTML=`<button id="lastAddSide" style="margin-top:8px">+ Add another photo (e.g. a coin's other side, or a book's copyright page)</button>`;
+        $('lastAddSide').onclick=()=>{ coinSideTargetId=id; $('coinSideShot').click(); };
+      }
+    }
     renderQueue();
   }catch(err){
     await put('items',{...item,state:prevState});
@@ -1489,7 +1491,7 @@ async function renderResults(){
       </div>
       ${i.category==='book' && !i.book && i.state==='done'?`<button data-isbn="${i.id}" style="margin-top:8px">Photograph copyright page</button>`:''}
       ${i.category==='coin' && !i.coin && i.state==='done'?`<button data-retrycoin="${i.id}" style="margin-top:8px">Retry coin lookup</button>`:''}
-      ${i.category==='coin' && !i.full2 && i.state==='done'?`<button data-coinside="${i.id}" style="margin-top:8px">+ Add other side</button>`:''}
+      ${(i.category==='coin'||i.category==='book') && !i.full2 && i.state==='done'?`<button data-coinside="${i.id}" style="margin-top:8px">+ Add another photo</button>`:''}
     </div>
     <button data-del="${i.id}" data-delbox="${esc(i.box)}" class="danger" aria-label="Delete">✕</button>
   </div></div>`).join('');
