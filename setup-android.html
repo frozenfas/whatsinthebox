@@ -1,0 +1,339 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What's in the Box — Getting started on Android</title>
+<style>
+:root{
+  --paper:#EDEFF2;
+  --card:#FFFFFF;
+  --ink:#111418;
+  --muted:#616C7A;
+  --line:#D2D8DF;
+  --signal:#1B4FD8;
+  --tag:#F5C400;
+  --warn:#B3261E;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#15171B;
+    --card:#1D2025;
+    --ink:#EDEFF2;
+    --muted:#8B95A3;
+    --line:#33383F;
+    --signal:#5B8CFF;
+    --tag:#F5C400;
+    --warn:#FF6B60;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#15171B; --card:#1D2025; --ink:#EDEFF2; --muted:#8B95A3;
+  --line:#33383F; --signal:#5B8CFF; --tag:#F5C400; --warn:#FF6B60;
+}
+:root[data-theme="light"]{
+  --paper:#EDEFF2; --card:#FFFFFF; --ink:#111418; --muted:#616C7A;
+  --line:#D2D8DF; --signal:#1B4FD8; --tag:#F5C400; --warn:#B3261E;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--paper);
+  color:var(--ink);
+  -webkit-text-size-adjust:100%;
+}
+.wrap{max-width:620px;margin:0 auto;padding:28px 20px 64px}
+
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.brandmark{width:30px;height:30px;flex:0 0 auto;color:var(--ink)}
+.brandmark svg{width:100%;height:100%;display:block}
+.eyebrow{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+h1{
+  margin:2px 0 0;
+  font-size:26px;
+  font-weight:640;
+  letter-spacing:-0.01em;
+  text-wrap:balance;
+}
+.intro{
+  margin:18px 0 30px;
+  font-size:16px;
+  line-height:1.55;
+  color:var(--ink);
+  max-width:56ch;
+}
+.intro strong{color:var(--ink)}
+
+.for-name{
+  display:inline-block;
+  font-family:var(--mono);
+  font-weight:700;
+  font-size:12px;
+  letter-spacing:0.04em;
+  background:var(--tag);
+  color:#111;
+  padding:3px 8px;
+  border-radius:3px;
+  margin-bottom:14px;
+}
+
+.steps{display:flex;flex-direction:column;gap:14px}
+.step{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:18px 18px 20px;
+  position:relative;
+}
+.step-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.num{
+  font-family:var(--mono);
+  font-weight:700;
+  font-size:13px;
+  color:var(--muted);
+  flex:0 0 auto;
+}
+.step h2{
+  margin:0;
+  font-size:17px;
+  font-weight:640;
+  letter-spacing:-0.005em;
+}
+.step p{
+  margin:0 0 10px;
+  font-size:15px;
+  line-height:1.55;
+  color:var(--ink);
+}
+.step p:last-child{margin-bottom:0}
+.step p.muted{color:var(--muted);font-size:13.5px}
+
+.tap{
+  display:inline-block;
+  font-family:var(--mono);
+  font-weight:600;
+  font-size:13px;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:2px 8px;
+  color:var(--ink);
+}
+a{color:var(--signal);text-decoration:none;font-weight:600}
+a:hover, a:focus-visible{text-decoration:underline}
+a:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:2px}
+
+.linkcard{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:9px;
+  padding:12px 14px;
+  margin-top:2px;
+}
+.linkcard .url{
+  font-family:var(--mono);
+  font-size:13px;
+  color:var(--ink);
+  word-break:break-all;
+}
+.linkcard .go{
+  flex:0 0 auto;
+  font-family:var(--mono);
+  font-weight:700;
+  font-size:12px;
+  letter-spacing:0.04em;
+  background:var(--signal);
+  color:#fff;
+  padding:6px 11px;
+  border-radius:6px;
+  white-space:nowrap;
+}
+
+.chip-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.pill{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:0.04em;
+  border:1px solid var(--line);
+  border-radius:100px;
+  padding:3px 9px;
+  color:var(--muted);
+}
+
+.callout{
+  border-left:3px solid var(--tag);
+  background:var(--paper);
+  border-radius:0 8px 8px 0;
+  padding:10px 14px;
+  margin-top:12px;
+  font-size:14px;
+  line-height:1.5;
+}
+.callout.warn{border-left-color:var(--warn)}
+
+.skip{
+  margin-top:34px;
+  padding-top:22px;
+  border-top:1px solid var(--line);
+}
+.skip .eyebrow{margin-bottom:8px}
+.skip p{font-size:14.5px;line-height:1.55;color:var(--muted);margin:0}
+
+footer{
+  margin-top:36px;
+  font-size:12.5px;
+  color:var(--muted);
+  line-height:1.6;
+}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <span class="brandmark" aria-hidden="true">
+      <svg viewBox="0 0 200 200"><path d="M100 38 L158 72 L158 134 L100 168 L42 134 L42 72 Z" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><path d="M42 72 L100 102 L158 72 M100 102 L100 168" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><line x1="100" y1="38" x2="128" y2="46" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><g transform="rotate(-16 150 55)"><rect x="125" y="39" width="50" height="32" rx="6" fill="#F5C400"/><circle cx="137" cy="55" r="4.5" fill="#fff"/></g></svg>
+    </span>
+    <div>
+      <div class="eyebrow">Storage register &middot; Android setup</div>
+      <h1>Getting What's in the Box working on your phone</h1>
+    </div>
+  </header>
+
+  <p class="intro">
+    Seven steps, about ten minutes. This covers photographing and finding
+    ordinary things you pack, plus getting both our phones on the same
+    list — nothing about coins here, that's a separate thing you can
+    ignore entirely.
+  </p>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-head"><span class="num">1</span><h2>Open the app and install it</h2></div>
+      <p>In Chrome, open this address:</p>
+      <a class="linkcard" href="https://frozenfas.github.io/whatsinthebox/" target="_blank" rel="noopener">
+        <span class="url">frozenfas.github.io/whatsinthebox</span>
+        <span class="go">Open</span>
+      </a>
+      <p style="margin-top:12px">
+        Chrome will offer <strong>Add to Home screen</strong> — either as a
+        banner at the bottom, or under the <span class="tap">&#8942;</span>
+        menu in the top right. Tap it and confirm. This puts a proper icon
+        on your home screen so it opens full-screen, like a normal app.
+      </p>
+      <p class="muted">You only do this once.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><span class="num">2</span><h2>Add the identification key</h2></div>
+      <p>
+        Open the app from your home screen, then go to the
+        <span class="tap">Setup</span> tab. Under <strong>Identification</strong>,
+        paste in the API key — I'll send this to you separately. Tap
+        <strong>Save</strong>.
+      </p>
+      <p class="muted">
+        This is what lets the app recognise what's in each photo. Without
+        it, photos just sit there unidentified.
+      </p>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><span class="num">3</span><h2>Say who's entering things</h2></div>
+      <p>
+        Still on <span class="tap">Setup</span>, under <strong>About you</strong>,
+        type your name and save. It gets stamped on locations you create, so
+        we can tell who packed what later.
+      </p>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><span class="num">4</span><h2>Connect the two phones</h2></div>
+      <p>
+        Still on <span class="tap">Setup</span>, under
+        <strong>Sync between phones</strong>: enter the shared
+        <strong>sync passphrase</strong> — same one on both phones, I'll
+        send it to you separately, not here — and tap
+        <strong>Save passphrase</strong>. It scrambles everything before
+        it ever leaves your phone, so keep it somewhere you won't lose,
+        like your password manager.
+      </p>
+      <p>
+        Then tap <strong>Connect OneDrive</strong> and sign in with the
+        <strong>shared account</strong> I'll also send you separately —
+        not your own personal Microsoft account. Both phones use that
+        same sign-in, which is what lets them share one list.
+      </p>
+      <p>
+        After that, tap <strong>Sync now</strong> any time you want the
+        two catalogues to catch up with each other — it also happens on
+        its own whenever you open the app with a connection.
+      </p>
+      <div class="callout warn">
+        Sign in with the <em>shared</em> account, not your own — using
+        your personal Microsoft account here would try to sync into the
+        wrong place.
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><span class="num">5</span><h2>Set up a location</h2></div>
+      <p>
+        Go to the <span class="tap">Locations</span> tab. At the top, pick
+        or create the <strong>house</strong> you're actually standing in —
+        everything below only shows locations at that house, since you
+        can't be packing at both at once.
+      </p>
+      <p>
+        Then give a new location a name (a box, a shelf, a cupboard —
+        whatever it actually is) and a colour, and tap
+        <strong>Create box</strong>. Print its label if you've got a
+        printer handy, or just remember which one you're using for now.
+      </p>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><span class="num">6</span><h2>Photograph things as you pack</h2></div>
+      <p>
+        <span class="tap">Capture</span> tab, big camera button in the
+        middle. One object per photo. It'll save instantly and identify
+        itself in the background — you don't need to wait, just keep
+        photographing and packing.
+      </p>
+      <div class="callout">
+        If something's a coin or a book, a
+        <strong>"+ Add another photo"</strong> button appears once it's
+        identified — that's optional extra detail for those two categories
+        only. Everything else just needs the one photo.
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><span class="num">7</span><h2>Find things later</h2></div>
+      <p>
+        <span class="tap">Find</span> tab, search by name, material, or any
+        text printed on the object. This searches <em>both</em> houses at
+        once, and tells you which one each result is in.
+      </p>
+    </div>
+
+  </div>
+
+  <footer>
+    Everything you photograph stays on your phone, and syncs to the
+    shared account once step 4 is done — never to your own personal
+    OneDrive. Nothing about coins, Numista, or the scale card matters
+    for normal use — skip all of it.
+  </footer>
+
+</div>
