@@ -249,6 +249,16 @@ push-then-pull cycle was tested against a mocked Graph API using the
   (pack into a box on one phone at a time); would need real conflict
   resolution to be safe for genuinely concurrent editing.
 
+`getFile`/`putFile`/`listFiles` (in the OneDrive sync section of
+`index.html`) surface the real Graph error body (`error.message` or
+`error.code`) on failure, not just "Could not upload salt.txt" with no
+detail - added after an intermittent, unreproduced real failure on that
+exact call. A bare "Could not upload X" gives nothing to diagnose an
+intermittent failure with; a 403 for the wrong scope and a 429 for
+throttling need different fixes, and only the Graph body tells you
+which one happened. If this fires again, the toast text itself now
+says why.
+
 ## Printing (labels and the scale card)
 
 Both the label sheet and the scale card render into the same `#sheet`
