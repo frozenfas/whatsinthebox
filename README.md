@@ -73,7 +73,11 @@ phone. If you want the URL itself gated, Cloudflare Access adds a login free.
    "copies per label" choice controls how many identical copies print on
    one sheet — enough to tape on more than one side, or more than one
    shelf edge — sized to use the page well whether you pick 2, 4, or 6
-   per sheet.
+   per sheet. Sheets print at A4 with zero page margin (the printable
+   area is set by the label sheet's own layout, not your printer's
+   default margin) — if your printer's dialog offers a margin or scale
+   option, leave it at **Default margins / Actual size**, not
+   "Fit to page" or "Shrink to fit", or the label sizes will be off.
 5. Capture tab: one object per photo as it goes in — only locations at
    the currently-selected house show up here, since you can't be
    physically standing at the other one.
@@ -101,6 +105,32 @@ while identifying *any* object — shows as "Worth a look." That's a nudge
 to look closer yourself, not a valuation; nothing here can tell you what
 something is actually worth.
 
+## Coin lookup
+
+Anything identified as a coin gets an automatic, free lookup against
+Numista by title, shown under the item with its Numista catalogue number
+(N#) and a link back to Numista, as their terms require. Add a free
+Numista API key under Setup, "Coin lookup", to turn this on — no key,
+no automatic lookup.
+
+If the text search doesn't find a match, it just stays unmatched — there's
+no automatic image fallback, because Numista's image-search endpoint needs
+their paid plan (€100/month minimum). Setup has a **"Run image search on
+unmatched coins"** button instead: it shows you the real estimated cost
+first, and is meant to be run as an occasional batch once a backlog of
+unmatched coins has built up, not per-coin. Numista waives the €100
+monthly minimum for the first calendar month a paid plan is active, so
+the intended pattern is: activate the plan, run the batch once, then
+cancel or downgrade before the next billing month.
+
+## Photo scale card
+
+Setup, "Photo scale card" — prints a 0–100mm ruler to lay behind an
+object before photographing it, so its size can be read precisely from
+the photo instead of guessed. Especially useful for coins, where size
+often distinguishes two similar-looking ones. Print it once and reuse it.
+Same "Actual size, not Fit to page" rule as the labels applies.
+
 ## Syncing two phones (OneDrive)
 
 Setup is a one-time thing, already done for this deployment: an Azure app
@@ -123,6 +153,17 @@ On each phone, under Setup:
 3. **Sync now** whenever you want the two catalogues to merge. It also
    fetches on its own each time the app is opened with a connection.
 
+## Resetting the catalogue
+
+Setup, "Danger zone", "Reset all data" — wipes every house, location, and
+item on this phone. It does **not** touch your saved API keys, sync
+passphrase, or OneDrive connection, so you won't need to re-enter those
+afterwards. Before anything is deleted it downloads a full backup
+(catalogue + photos) automatically, and asks you to confirm twice — the
+second time by typing `DELETE`. If the other phone is synced, a reset here
+is recoverable by syncing again; if it isn't, the downloaded backup is the
+only copy, so keep it somewhere safe.
+
 ## Local development
 
 ```bash
@@ -139,8 +180,11 @@ Photos are resized to 1024 px before sending, landing around 1,400 input
 tokens each. On Haiku 4.5 that is roughly one to two euros per thousand
 objects. The rarity/"worth a look" check rides along on that same call
 (a few dozen extra tokens, not a second call), so it doesn't meaningfully
-change this. Book lookups are free and don't touch the Anthropic bill at
-all.
+change this. Book lookups and the automatic coin text lookup are both
+free and don't touch the Anthropic bill at all. The optional coin image
+search is the one paid extra in this app, entirely separate from the
+Anthropic bill and never run without a confirmation showing the real
+estimated cost first — see "Coin lookup" above.
 
 ## Known limits of this prototype
 

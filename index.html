@@ -182,7 +182,10 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
   body{background:#fff;padding:0}
   header,nav,main,.status{display:none!important}
   #sheet{display:grid!important;padding:8mm}
-  @page{size:portrait}
+  /* margin:0 here matters: without it the browser adds its own default
+     print margin on top of #sheet's own 8mm padding, and that doubled-up
+     margin is what pushed a normal 2-row sheet onto a second page. */
+  @page{size:A4 portrait;margin:0}
 }
 /* One dotted line per cut, shared between neighbours rather than a
    frame round each label - simplest way to show where the scissors go. */
@@ -207,6 +210,18 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
 #sheet.copies-6 .code{font-size:13px}
 #sheet.copies-6 .name{font-size:9px}
 #sheet.copies-6 .line{font-size:8px}
+
+/* scale card - physically accurate mm, for sizing objects in photos */
+.scalecard{padding:10mm}
+.scalecard h2{font-size:11px;font-weight:600;margin:0 0 3mm}
+.scalecard p{font-size:8px;color:#777;margin:0 0 8mm;font-family:var(--mono)}
+.ruler{position:relative;width:100mm;height:16mm}
+.ruler .baseline{position:absolute;left:0;right:0;bottom:5mm;height:0.3mm;background:#000}
+.ruler .tick{position:absolute;bottom:5mm;width:0.25mm;background:#000}
+.ruler .tick.major{height:6mm}
+.ruler .tick.minor{height:3.5mm}
+.ruler .tick.tiny{height:1.8mm}
+.ruler .label{position:absolute;bottom:11.5mm;font-size:7px;font-family:var(--mono);transform:translateX(-50%);color:#000}
 </style>
 </head>
 <body>
@@ -326,6 +341,19 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
       <button class="primary" id="saveSettings" style="width:100%">Save</button>
     </div>
     <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Coin lookup</div>
+      <label class="field"><span>Numista API key. Free plan, from numista.com. Stored on this phone only.</span>
+        <input type="password" id="numistaKey" placeholder="paste your key" autocomplete="off"></label>
+      <button class="primary" id="saveNumistaKey" style="width:100%;margin-bottom:10px">Save</button>
+      <button id="runImageSearch" style="width:100%">Run image search on unmatched coins</button>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5">Only works once you've activated Numista's paid plan (real cost, shown before it runs) - the free plan covers the automatic text lookup above.</p>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px">Photo scale card</div>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.5">A printable ruler to put behind an object before photographing it, so size can be read precisely from the photo instead of guessed - especially useful for coins, where size often tells two similar ones apart. Print once, keep it, reuse it. When your printer's dialog opens, choose <strong>Actual size</strong> (not "Fit to page") or the ruler will be wrong.</p>
+      <button id="printScaleCard" style="width:100%">Print scale card</button>
+    </div>
+    <div class="card">
       <div class="eyebrow" style="margin-bottom:8px">Your data</div>
       <p id="exportNote" style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5"></p>
       <div class="btnrow">
@@ -344,7 +372,13 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
         <tr><td style="padding:6px 0;vertical-align:top"><strong>Anthropic</strong><br><span style="color:var(--muted)">api.anthropic.com</span></td><td style="padding:6px 0;color:var(--muted);text-align:right">Identifies each photo. Your key, sent only when you capture something.</td></tr>
         <tr><td style="padding:6px 0;vertical-align:top;border-top:1px solid var(--line)"><strong>Microsoft OneDrive</strong><br><span style="color:var(--muted)">login.microsoftonline.com, graph.microsoft.com</span></td><td style="padding:6px 0;color:var(--muted);text-align:right;border-top:1px solid var(--line)">Syncs the catalogue between phones, only if you connect it above. What it stores is encrypted first.</td></tr>
         <tr><td style="padding:6px 0;vertical-align:top;border-top:1px solid var(--line)"><strong>Open Library</strong><br><span style="color:var(--muted)">openlibrary.org</span></td><td style="padding:6px 0;color:var(--muted);text-align:right;border-top:1px solid var(--line)">Looks up author/year for anything identified as a book. No account, runs automatically, fails silently if nothing matches.</td></tr>
+        <tr><td style="padding:6px 0;vertical-align:top;border-top:1px solid var(--line)"><strong>Numista</strong><br><span style="color:var(--muted)">api.numista.com</span></td><td style="padding:6px 0;color:var(--muted);text-align:right;border-top:1px solid var(--line)">Looks up coin details, only if you've added a key above. Your key, sent only for items identified as coins.</td></tr>
       </table>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px;color:var(--warn)">Danger zone</div>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5">Permanently erases every house, location, and item in this browser's storage. Does not touch your saved API keys, sync passphrase, or OneDrive connection. A catalogue + photos backup downloads automatically first, and you'll be asked to confirm twice.</p>
+      <button id="resetAll" class="danger" style="width:100%">Reset all data</button>
     </div>
   </section>
 
@@ -495,6 +529,7 @@ const getAll=s=>req(tx(s).getAll());
 const put=(s,v)=>req(tx(s,'readwrite').put(v));
 const del=(s,k)=>req(tx(s,'readwrite').delete(k));
 const get=(s,k)=>req(tx(s).get(k));
+const clearStore=s=>req(tx(s,'readwrite').clear());
 
 /* ---------------- encryption ----------------
  * Everything that leaves the device for OneDrive goes through here first.
@@ -784,7 +819,7 @@ document.querySelectorAll('nav button').forEach(b=>{
 });
 
 /* ---------------- boxes ---------------- */
-let state={box:null, key:'', model:'claude-haiku-4-5-20251001', house:null, copies:4, enteredBy:''};
+let state={box:null, key:'', model:'claude-haiku-4-5-20251001', house:null, copies:4, enteredBy:'', numistaKey:''};
 let pickedChip=PALETTE[0];
 function pickNewBoxChip(c){ pickedChip=c; renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip); }
 
@@ -928,6 +963,25 @@ async function printLabels(codes){
 $('printAll').onclick=async()=>{ const b=(await getAll('boxes')).filter(x=>x.house===state.house); printLabels(b.map(x=>x.code)); };
 $('copies').onchange=async e=>{ state.copies=Number(e.target.value); await put('settings',{k:'copies',v:state.copies}); };
 
+function buildRulerHtml(){
+  let ticks='';
+  for(let i=0;i<=100;i++){
+    const cls=i%10===0?'major':(i%5===0?'minor':'tiny');
+    ticks+=`<div class="tick ${cls}" style="left:${i}mm"></div>`;
+    if(i%10===0) ticks+=`<div class="label" style="left:${i}mm">${i}</div>`;
+  }
+  return `<div class="ruler"><div class="baseline"></div>${ticks}</div>`;
+}
+$('printScaleCard').onclick=()=>{
+  $('sheet').className='';
+  $('sheet').innerHTML=`<div class="scalecard">
+    <h2>What's in the Box - photo scale reference</h2>
+    <p>0-100mm. Should measure exactly 100mm end to end - if it doesn't, reprint at Actual size, not Fit to page.</p>
+    ${buildRulerHtml()}
+  </div>`;
+  setTimeout(()=>window.print(),120);
+};
+
 /* ---------------- capture ---------------- */
 function draw(src,edge,quality){
   const s=Math.min(1,edge/Math.max(src.width,src.height));
@@ -997,7 +1051,7 @@ const SCHEMA=`{
  "category": "one of: book, tool, kitchen, electronics, clothing, document, toy, art, furniture, sports, hobby, coin, jewellery, other",
  "material": "dominant material",
  "colour": "dominant colour",
- "approx_size_cm": "longest dimension estimate, number only",
+ "approx_size_cm": "longest dimension - if a printed mm ruler is visible in the photo, read the precise measurement off it; otherwise your best visual estimate. Number only",
  "visible_text": "any text, brand, model number or title legible in the photo, verbatim; empty string if none",
  "condition": "one of: new, good, worn, damaged, unknown",
  "rarity_notes": "anything visible worth a second look - first-edition mark, signature, price-clipped or missing dust jacket, unusual mint mark or date, printer's key, maker's mark, or similar; empty string if nothing noticeable",
@@ -1047,6 +1101,92 @@ async function lookupBookByIsbn(isbn){
   }catch(e){ return null; }
 }
 
+/* ---------------- coin lookup (Numista) ----------------
+ * Same additive rule as books: shown alongside Claude's own fields,
+ * never merged into or replacing them. Needs a key (free plan, 2000
+ * requests/month, no Search by Image - that tier has a real cost floor,
+ * ruled out for a personal project). Numista's terms require the N#
+ * identifier to be clearly shown with every result plus "Numista"
+ * credited as the source - not optional styling, a term of the licence -
+ * so both are always rendered together, never just one. */
+async function lookupCoin(title){
+  if(!state.numistaKey) return null;
+  try{
+    const params=new URLSearchParams({q:title, category:'coin', count:'1', lang:'en'});
+    const r=await fetch('https://api.numista.com/api/v3/types?'+params, {headers:{'Numista-API-Key':state.numistaKey}});
+    if(!r.ok) return null;
+    const t=(await r.json()).types?.[0];
+    if(!t) return null;
+    return {
+      n:t.id,
+      title:t.title||null,
+      issuer:t.issuer?.name||null,
+      minYear:t.min_year??null,
+      maxYear:t.max_year??null,
+      thumbnail:t.obverse_thumbnail||null,
+      url:'https://en.numista.com/'+t.id
+    };
+  }catch(e){ return null; }
+}
+
+// Numista's paid-plan-only image search - real money per call (see the
+// pricing note in CLAUDE.md), so this is never triggered automatically,
+// only from the explicit batch action below. The request shape (an
+// "obverse" field, base64 JPEG, no data URL prefix) is the best-effort
+// reading of Numista's public docs; confirmed the endpoint, auth, and
+// its 403 Permission Denied behaviour on a free-plan key directly, but
+// could NOT verify a successful response shape without the paid plan
+// active - check data.types vs data.results vs data.matches once this
+// has actually been run for real, and correct if it's none of those.
+async function searchCoinByImage(fullDataUrl){
+  const r=await fetch('https://api.numista.com/api/v3/search_by_image', {
+    method:'POST',
+    headers:{'Numista-API-Key':state.numistaKey, 'content-type':'application/json'},
+    body:JSON.stringify({obverse:b64(fullDataUrl), category:'coin'})
+  });
+  if(r.status===403) throw new Error('NOT_ENTITLED');
+  if(!r.ok) return null;
+  const data=await r.json();
+  const t=data.types?.[0] ?? data.results?.[0] ?? data.matches?.[0];
+  if(!t) return null;
+  return {
+    n:t.id, title:t.title||null, issuer:t.issuer?.name||null,
+    minYear:t.min_year??null, maxYear:t.max_year??null,
+    thumbnail:t.obverse_thumbnail||null, url:'https://en.numista.com/'+t.id
+  };
+}
+// Intended usage, not enforced by the code: Numista's paid-plan minimum
+// (€100/month) is waived for the first calendar month the plan is active
+// (their terms, section 6.7). So the plan is to activate the paid plan,
+// run this batch once against whatever backlog of unmatched coins has
+// built up on the free plan, then close or downgrade the account before
+// the next billing month starts - real cost becomes the one-time €100
+// activation fee plus ~€0.03/coin searched, not an ongoing €100/month.
+// Worth doing once there's a real backlog (tens of coins), not for one
+// or two.
+async function runImageSearchBatch(){
+  if(!state.numistaKey) return toast('Add a Numista API key under Setup first');
+  const items=(await getAll('items')).filter(i=>i.category==='coin' && !i.coin && i.full);
+  if(!items.length) return toast('No unmatched coins to search');
+  const cost=(items.length*0.03).toFixed(2);
+  const sure=confirm(`Search ${items.length} coin${items.length===1?'':'s'} using Numista's image search? This is real money charged to your Numista account - about €${cost} at €0.03 each, and only works once you've activated their paid plan. Continue?`);
+  if(!sure) return;
+  let done=0, found=0;
+  for(const item of items){
+    try{
+      const coin=await searchCoinByImage(item.full);
+      if(coin){ await put('items',{...item,coin,updated:Date.now()}); await touchBox(item.box); found++; }
+      done++;
+    }catch(e){
+      if(e.message==='NOT_ENTITLED'){ toast("Your Numista account isn't on the paid plan yet - activate it at numista.com first"); return; }
+      done++;
+    }
+  }
+  renderResults();
+  toast(`Searched ${done} coin${done===1?'':'s'}, found ${found} match${found===1?'':'es'}`);
+}
+$('runImageSearch').onclick=runImageSearchBatch;
+
 async function classify(id){
   const item=await get('items',id);
   if(!item||item.state==='done') return;
@@ -1077,9 +1217,10 @@ async function classify(id){
     const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
     const clean=text.replace(/```json|```/g,'').trim();
     const o=JSON.parse(clean);
-    let book=null;
+    let book=null, coin=null;
     if(o.category==='book') book=await lookupBookByTitle(o.title, null);
-    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book});
+    if(o.category==='coin') coin=await lookupCoin(o.title);
+    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book,coin});
     await touchBox(item.box);
     if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
     renderQueue();
@@ -1119,6 +1260,7 @@ async function renderResults(){
       <h3>${esc(i.title)}</h3>
       ${i.visible_text?`<p>“${esc(i.visible_text)}”</p>`:''}
       ${i.book?`<p>${esc(i.book.author||'Unknown author')}${i.book.year?' · '+i.book.year:''} <span style="color:var(--muted)">(Open Library)</span></p>`:''}
+      ${i.coin?`<p>${esc(i.coin.issuer||'Unknown issuer')}${i.coin.minYear?' · '+i.coin.minYear+(i.coin.maxYear&&i.coin.maxYear!==i.coin.minYear?'–'+i.coin.maxYear:''):''} <span style="color:var(--muted)">(N#${i.coin.n} · Source: Numista)</span></p>`:''}
       ${worthLook(i)?`<p style="color:var(--warn)">Worth a look: ${esc(worthLook(i))}</p>`:''}
       <div class="meta">
         <span class="chip" style="background:${boxChip[i.box]||'#F5C400'}">${esc(i.box)}</span>
@@ -1192,6 +1334,11 @@ $('saveEnteredBy').onclick=async()=>{
   await put('settings',{k:'enteredBy',v:state.enteredBy});
   toast('Saved');
 };
+$('saveNumistaKey').onclick=async()=>{
+  state.numistaKey=$('numistaKey').value.trim();
+  await put('settings',{k:'numistaKey',v:state.numistaKey});
+  toast('Saved');
+};
 function showPassphraseStatus(){
   $('passphraseStatus').textContent = state.syncPassphrase
     ? 'Passphrase is set on this phone.'
@@ -1231,18 +1378,34 @@ function download(name,blob){
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),4000);
 }
-$('exportJson').onclick=async()=>{
+async function exportJson(){
   const [houses,boxes,items]=await Promise.all([getAll('houses'),getAll('boxes'),getAll('items')]);
   const slim=items.map(({full,thumb,...rest})=>rest);
   download('whatsinthebox-catalogue.json',new Blob([JSON.stringify({houses,boxes,items:slim},null,2)],{type:'application/json'}));
-};
-$('exportPhotos').onclick=async()=>{
+}
+async function exportPhotos(){
   const items=await getAll('items');
   const doc=`<!doctype html><meta charset=utf-8><title>What's in the Box photos</title>
   <style>body{font-family:sans-serif;background:#111;color:#eee}figure{display:inline-block;margin:8px;width:220px}
   img{width:100%;border-radius:6px}figcaption{font-size:12px;margin-top:4px}</style>`+
   items.map(i=>`<figure><img src="${i.full}"><figcaption>${esc(i.box)} · ${esc(i.title)}</figcaption></figure>`).join('');
   download('whatsinthebox-photos.html',new Blob([doc],{type:'text/html'}));
+}
+$('exportJson').onclick=exportJson;
+$('exportPhotos').onclick=exportPhotos;
+$('resetAll').onclick=async()=>{
+  const step1=confirm('This permanently deletes every house, location, and item in this browser\'s storage - everything on the Locations, Find, and Capture tabs. It does not touch your saved API keys, sync passphrase, or OneDrive connection.\n\nA backup (catalogue + photos) downloads automatically before anything is deleted.\n\nContinue?');
+  if(!step1) return;
+  await exportJson();
+  await exportPhotos();
+  const typed=prompt('Backup downloaded. Type DELETE (all capitals) to permanently erase the catalogue on this phone:');
+  if(typed!=='DELETE'){ toast('Reset cancelled'); return; }
+  await Promise.all([clearStore('houses'),clearStore('boxes'),clearStore('items')]);
+  await del('settings','house'); await del('settings','box');
+  state.house=null; state.box=null;
+  await refreshHouseSelects(); await refreshBoxSelects();
+  renderBoxes(); renderResults(); showUsage();
+  toast('Catalogue reset - backup was downloaded first');
 };
 async function showUsage(){
   const items=await getAll('items');
@@ -1266,11 +1429,13 @@ async function showUsage(){
   state.copies=m.copies||4;
   state.syncPassphrase=m.syncPassphrase||'';
   state.enteredBy=m.enteredBy||'';
+  state.numistaKey=m.numistaKey||'';
   const houses=await getAll('houses');
   state.house=(m.house!=null && houses.some(h=>h.id===m.house)) ? m.house : (houses[0]?.id ?? null);
   $('apiKey').value=state.key; $('model').value=state.model;
   $('copies').value=state.copies;
   $('enteredBy').value=state.enteredBy;
+  $('numistaKey').value=state.numistaKey;
   $('syncPassphrase').value=state.syncPassphrase;
   renderSwatches($('newBoxChips'),pickedChip,pickNewBoxChip);
   await refreshHouseSelects();

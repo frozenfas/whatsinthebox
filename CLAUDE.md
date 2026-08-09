@@ -40,6 +40,9 @@ Android Chrome also supported for install/camera/PWA).
 | Open Library over Google Books for book lookup | Google Books' unauthenticated quota is zero (`quota_limit_value: "0"`, confirmed by an actual 429) - not rate-limited under load, categorically blocked without an API key. Adding a Google Cloud project/key wasn't worth the setup cost this session already paid once for Azure. Open Library needs no key and was confirmed working, including on a Spanish-language title, from this deployment's real origin. |
 | Rarity/value flagging is one extra field on the existing Claude call, not a second call | Keeps the cost impact marginal (a few dozen tokens) and spread across every category, not doubled for books specifically. Combined for free with Open Library's `edition_count` where available. Never a real appraisal - see roadmap item 5. |
 | "Box" renamed to "location" in the UI only; every internal name stays `box` | A location doesn't have to be a literal box - a shelf or cupboard works the same way. Renaming every function, variable, DB store name, and sync file naming convention (`{box.uid}.box.json`) to match would have meant re-touching most of an already-tested codebase for zero user-visible benefit. `CODE_PREFIX` (`'LOCATION-'`, 4-digit) controls the printed/displayed code; `boxes`/`createBox`/`item.box`/etc. are unchanged and mean the same thing they always did. Don't "fix" this inconsistency by renaming internals later without a real reason - it was a deliberate scope cut, not an oversight. |
+| Numista over Colnect for coin lookup | Numista has a real, documented, keyed API with CORS support, confirmed live from this deployment's origin. Colnect was checked directly against its own docs page and explicitly states `CORS: No` - a non-starter for a browser-only app with no proxy. |
+| Coin image search is a manual, cost-gated batch action, not automatic | Numista's `search_by_image` endpoint needs a paid plan (€100/month minimum), unlike the free text search used automatically on every coin. Automatic per-photo image search would be an ongoing €100/month for a personal project. Instead `runImageSearchBatch()` lets the paid plan be activated for one calendar month (Numista waives the minimum for that first month per their terms §6.7), run once against whatever backlog has built up, then cancelled - real cost becomes the one-time activation plus ~€0.03/coin, not a standing subscription. `confirm()` shows the real estimated cost before it runs. |
+| Scale card uses literal `mm` CSS units, same as the label sheet | Already proven physically accurate for printed labels at 96dpi-equivalent CSS mm. Reusing it for a 0-100mm ruler means the same `@page`/print pipeline and the same "print at Actual size" caveat, rather than a second unit system to get right. |
 
 ## Files
 
@@ -58,7 +61,7 @@ boxes    { code: "BOX-001", uid, name, created, updated,      keyPath: code
 items    { id, uid, box, full, thumb, state, created,         keyPath: id (auto)
            updated, title, category, material, colour,        indexes: box, state
            approx_size_cm, visible_text, condition,
-           rarity_notes, book, tags[], confidence }
+           rarity_notes, book, coin, tags[], confidence }
 settings { k, v }                                              keyPath: k
 ```
 
@@ -87,6 +90,22 @@ heuristic (a book with very few known editions on Open Library, `editionCount
 <= 5`) into a single "worth a second look" flag - neither signal is a real
 appraisal, both are free, and genuine valuation stays a human step, same
 answer as the paintings/antiques case in the roadmap below.
+
+`item.coin` (`{n, title, issuer, minYear, maxYear, thumbnail, url}` or
+`null`) is the same additive pattern as `item.book`, fetched from Numista
+by title when `category` comes back `"coin"`. Numista's Terms of Use
+require the N# catalogue number and "Source: Numista" shown alongside any
+result derived from their data - `renderResults()` always renders both,
+not optionally. If the automatic text search doesn't match, the item has
+no `coin` field and sits in the pool `runImageSearchBatch()` (Setup tab,
+"Run image search on unmatched coins") can search by photo instead, one
+paid batch call per coin, cost shown and confirmed before it runs - see
+the decisions table above for why this is manual and batched rather than
+automatic. The response shape for `search_by_image` was not verified
+against a real paid-plan account (the free plan returns 403
+`NOT_ENTITLED`) - `searchCoinByImage()` in `index.html` is flagged
+in-code as a best-effort guess at the shape, to be corrected the first
+time the batch actually runs against a live paid account.
 
 `updated` (on houses, boxes, and items) and `uid` (on houses, boxes, and
 items) exist for sync, not the UI. `updated` decides which side wins when
@@ -210,6 +229,36 @@ push-then-pull cycle was tested against a mocked Graph API using the
   (pack into a box on one phone at a time); would need real conflict
   resolution to be safe for genuinely concurrent editing.
 
+## Printing (labels and the scale card)
+
+Both the label sheet and the scale card render into the same `#sheet`
+element and share one `@media print` block. `@page` sets `size:A4
+portrait;margin:0` deliberately - without an explicit `margin:0`, the
+browser's own default print margin stacks on top of `#sheet`'s own `8mm`
+padding, and that doubled-up margin was enough to push even a normal
+4-label, 2-row sheet onto a second page (a real bug, found and fixed, not
+hypothetical). `#sheet`'s `8mm` padding is the only margin that should
+exist; A4 is forced explicitly rather than left to the browser/printer
+default (which can be US Letter, a few mm shorter, on a US-configured
+device) so the row-height math in the `.copies-N` rules stays correct
+regardless of local printer defaults. If the row heights for `copies-2` /
+`copies-4` / `copies-6` (or the scale card's ruler) ever change, re-check
+that `rows * row-height <= 281mm` (297mm page - 16mm sheet padding) before
+shipping - that's the actual budget, not 297mm.
+
+## Reset & backup
+
+Setup tab, "Danger zone": `resetAll` clears the `houses`, `boxes`, and
+`items` stores only - never `settings`, so API keys, the sync passphrase,
+and the OneDrive connection all survive a reset. Two gates before
+anything is deleted: a `confirm()` describing the scope, then a forced
+`exportJson()` + `exportPhotos()` (the same functions the manual "Export
+catalogue"/"Export photos" buttons call) before a second `prompt()`
+requires typing `DELETE` exactly. If sync is connected, a reset is
+recoverable via the next `syncNow()` pull; if it isn't, the downloaded
+backup is the only copy - the forced-backup step exists specifically for
+that case, not as a formality.
+
 ## Running it
 
 ```bash
@@ -262,14 +311,23 @@ the install prompt works without any certificate.
 5. Category-specific enrichment behind one resolver interface. **Books:
    done** - Open Library lookup by title (auto) or ISBN (manual retry when
    the title search doesn't match), plus the `rarity_notes` /
-   `worthLook()` flag described above. Coins via Numista are next, same
-   shape: additive metadata, never overwriting Claude's own fields, no
-   silent trust of a free API's data. Stamps and other catalogued
-   collectibles via similar structured lookups where a free/affordable API
-   exists. Paintings, sculpture, and furniture don't have an equivalent of
-   an ISBN or catalogue number to look up, and no affordable structured
-   database of maker's marks or auction records exists to query. For that
-   category the realistic scope is not automated identification — it's
-   flagging the item (e.g. low classifier confidence, or a visible
-   signature/mark worth a closer look) so the human decides whether it's
-   worth a real appraisal, not this app guessing at attribution or value.
+   `worthLook()` flag described above. **Coins: done** - Numista lookup by
+   title (auto, free plan), plus an optional paid batch image search for
+   anything the text search missed (see "Coin lookup" in the Data model
+   section above). Stamps and other catalogued collectibles via similar
+   structured lookups where a free/affordable API exists. Paintings,
+   sculpture, and furniture don't have an equivalent of an ISBN or
+   catalogue number to look up, and no affordable structured database of
+   maker's marks or auction records exists to query. For that category
+   the realistic scope is not automated identification — it's flagging
+   the item (e.g. low classifier confidence, or a visible signature/mark
+   worth a closer look) so the human decides whether it's worth a real
+   appraisal, not this app guessing at attribution or value.
+6. Live-test the Numista batch image search against a real paid-plan
+   account - the response shape in `searchCoinByImage()` is currently a
+   best-effort guess (see the "Coin lookup" note above), since the free
+   plan can only confirm the endpoint returns 403 `NOT_ENTITLED`, not what
+   a successful response actually looks like.
+7. Revisit the QR label design - deferred on purpose until the coin
+   module, batch image search, scale card, and reset/backup features
+   (all above) were done first.
