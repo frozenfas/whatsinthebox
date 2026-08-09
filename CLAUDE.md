@@ -48,6 +48,8 @@ Android Chrome also supported for install/camera/PWA).
 | "+ Add another photo" also lives on the Capture tab, not just Find | Originally only reachable from the Find tab, which meant leaving the tab you're actively packing from just to flip a coin over - real friction for something meant to save a step, reported directly. `showLast()` now offers the same action immediately after a capture, and `$('shot').onchange` gives the initial identification a 1.5s local timer (not a network wait) before firing, specifically so tapping this within that window results in one two-photo `classify()` call instead of two racing single-photo ones. |
 | `classify()` re-fetches the item immediately before its final write, rather than reusing its start-of-call snapshot | The same class of bug as the `DB_VER`/`walkCursor` issue above: if a second photo is added to an item while its first identification call is still in flight, writing back a stale snapshot at the end would silently erase that photo. A `classifying` `Set` also skips a second identification call for an item already mid-identification, so two photos added in quick succession don't fire two overlapping (and double-cost) Claude calls - if that skip ever means the second photo isn't factored in immediately, the photo itself is never lost, just needs one more tap to force a re-run. |
 | Item detail view opens on tap, not a separate route/tab | A modal overlay (`#detailOverlay`) keeps this to one file with no router, consistent with the rest of the app. It exists specifically because the compact result card doesn't have room for every field, and because a wrong Numista match (Claude's title genuinely leading it astray - a real 20-cent-euro-coin case, not hypothetical) needed a place to fix the search text and retry without a full re-identification. |
+| Numista search never runs off a single photo; only ~1.5s after both sides are known, or on an explicit tap | Originally every coin identification triggered a search immediately - meaning any coin that later got a second photo (a routine sequence) was searched twice, once on partial information about to be superseded. Splitting `classify()` (identification) from `runCoinSearch()`/`searchNumista()` (matching) entirely removes that waste, at the cost of a single-photo coin needing one manual "Retry coin lookup" tap to get a match at all, rather than getting one for free - a deliberate tradeoff, chosen directly over the alternatives (a longer debounce, or leaving the double-search as-is). |
+| Item detail's Numista search shows up to 6 candidates to pick from, not just the top result | `q` is a free-text search with no guaranteed-correct top hit - confirmed a real case where it wasn't (a 20-cent-euro-coin match landed on the wrong design). `lookupCoin()` (first-result-only) still backs the *automatic* and quick-retry paths, since nobody's present there to choose; the deliberate, manual detail-view search is where a wrong top pick is actually correctable. |
 
 ## Files
 
@@ -65,8 +67,8 @@ boxes    { code: "BOX-001", uid, name, created, updated,      keyPath: code
            sealed, house, chip, enteredBy }                   index: house
 items    { id, uid, box, full, thumb, full2, thumb2, state,   keyPath: id (auto)
            created, updated, title, category, material,       indexes: box, state
-           colour, approx_size_cm, visible_text, condition,
-           rarity_notes, book, coin, tags[], confidence }
+           colour, approx_size_cm, visible_text, date_on_item,
+           condition, rarity_notes, book, coin, tags[], confidence }
 settings { k, v }                                              keyPath: k
 ```
 
@@ -98,32 +100,41 @@ answer as the paintings/antiques case in the roadmap below.
 
 `item.coin` (`{n, title, issuer, minYear, maxYear, thumbnail,
 reverseThumbnail, url}` or `null`) is the same additive pattern as
-`item.book`, fetched from Numista by title when `category` comes back
-`"coin"`. Numista's Terms of Use require the N# catalogue number and
-"Source: Numista" shown alongside any result derived from their data -
-`renderResults()` always renders both, not optionally, and now renders
-the N# as an actual link to `item.coin.url` (`https://en.numista.com/{id}`
-- confirmed live, not guessed: the API itself returns no URL field, and
+`item.book`, but unlike `item.book` it is **never** set as a side effect
+of `classify()` - see "Numista search fields" below for the full
+reasoning and for `q`/`year`/`size`. It's only ever written by one of:
+- `runCoinSearch()`, automatically, ~1.5s after both sides of a coin are
+  known (`coinSideShot`'s handler) - never on a single photo.
+- The "Retry coin lookup" button (`renderResults()`, shown when
+  `category==='coin' && !coin && state==='done'`) - a single quick pick
+  of the top result, same as `runCoinSearch()`, for a single-photo coin
+  the user wants a guess on without adding a second photo, or an item
+  identified before a Numista key ever existed (`lookupCoin()` silently
+  returns `null` with no key - a real thing that happened while building
+  this, with no visible reason why until this button existed).
+- The item detail view's own search, which shows up to 6 candidates to
+  choose from (`searchNumista({...,count:6})`) rather than silently
+  trusting Numista's top hit - a free-text search has no way to
+  guarantee the first result is the right coin, and there was no way to
+  tell if it wasn't before this existed.
+
+Numista's Terms of Use require the N# catalogue number and "Source:
+Numista" shown alongside any result derived from their data -
+`renderResults()` always renders both, not optionally, and renders the
+N# as an actual link to `item.coin.url` (`https://en.numista.com/{id}` -
+confirmed live, not guessed: the API itself returns no URL field, and
 the more obvious `/catalogue/pieces{id}.html` form 403s under a
-non-browser user-agent and only reveals itself as a redirect to the short
-form under a real one). `thumbnail`/`reverseThumbnail` (the API returns
-both, unprompted) render next to that line specifically so the user can
-visually confirm a text-only match is actually the right coin before
+non-browser user-agent and only reveals itself as a redirect to the
+short form under a real one). `thumbnail`/`reverseThumbnail` (the API
+returns both, unprompted) render next to that line specifically so the
+user can visually confirm a match is actually the right coin before
 trusting it, rather than having to click through to Numista's own site
-to check. If the automatic text search doesn't match, the item has
-no `coin` field and sits in the pool `runImageSearchBatch()` (Setup tab,
-"Run image search on unmatched coins") can search by photo instead, one
-paid batch call per coin, cost shown and confirmed before it runs - see
-the decisions table above for why this is manual and batched rather than
-automatic. A "Retry coin lookup" button (`renderResults()`, shown when
-`category==='coin' && !coin && state==='done'`) covers the other reason
-`coin` can be missing: the item was identified before a Numista key was
-ever saved, so `lookupCoin()` silently returned `null` with nothing to
-show and no visible reason why - a real thing that happened while
-building this. The button just re-runs `lookupCoin(item.title)` against
-the title Claude already produced - free, no new photo, no Claude call -
-rather than requiring a full re-identification to retry something that
-was never Claude's fault. `item.full2`/`item.thumb2` are an optional second photo, same
+to check. If nothing has matched yet, the item has no `coin` field and
+sits in the pool `runImageSearchBatch()` (Setup tab, "Run image search
+on unmatched coins") can search by photo instead, one paid batch call
+per coin, cost shown and confirmed before it runs - see the decisions
+table above for why this is manual and batched rather than automatic.
+`item.full2`/`item.thumb2` are an optional second photo, same
 shape as `full`/`thumb`, added after the fact via the "+ Add other side"
 button (`renderResults()`, coin items only, shown once `state==='done'`
 and no `full2` yet). One photo is always enough to save an item - this
@@ -269,6 +280,80 @@ intermittent failure with; a 403 for the wrong scope and a 429 for
 throttling need different fixes, and only the Graph body tells you
 which one happened. If this fires again, the toast text itself now
 says why.
+
+## Numista search fields
+
+Confirmed directly against Numista's real API docs (`en.numista.com/api/doc`
+- bot-walled, needs a real browser, not `curl`, to load), not assumed. The
+`/types` search endpoint's actual parameters: `q` (free text), `issuer` (an
+internal *code*, not a free country name - would need a separate `/issuers`
+lookup to resolve one to the other, not built), `catalogue`+`number`
+(cross-reference lookup, not useful here), `ruler`/`material` (internal
+IDs, same problem as issuer), `year` (as written on the item, or a range
+like `"1800-1850"`), `date` (Gregorian year/range), `size` (mm, or a
+range), `weight` (grams, or a range). At least one of
+`q`/`issuer`/`catalogue`/`date`/`year` is required. **There is no
+parameter to search by obverse/reverse lettering, script, or
+denomination** - those exist only in the full type detail response
+(`/types/{id}`), not as search filters, so "search by what's written on
+the reverse" isn't something this API can do, only `q` free text can get
+you there indirectly.
+
+`searchNumista({q, year, size, count})` in `index.html` uses the three
+search params that are actually practical here:
+- `q` - `item.title`. `SCHEMA`'s `title` field instructs Claude to phrase
+  a coin's title in Numista's own catalogue convention specifically
+  (`"{denomination} - {design/ruler} - {issuer}"`, e.g. `"1 Cent -
+  Victoria - Canada"`) rather than a natural description, on the theory
+  that matching their own indexing style matters more than readability
+  for this one field - confirmed that's genuinely their convention by
+  reading a real catalogue entry (numista.com/7984), not guessed.
+- `year` - `item.date_on_item`, a `SCHEMA` field for any date/year
+  literally visible on the object (not coin-specific in the schema
+  itself, in case it's ever useful for books or maker's marks too, but
+  currently only coins do anything with it).
+- `size` - `item.approx_size_cm`, already collected on every item for
+  the catalogue regardless of Numista, converted to mm via `cmToMm()`.
+  Free: no extra Claude field, no extra API call, just using data that
+  already existed.
+
+`lookupCoin(params)` is a thin wrapper over `searchNumista` that returns
+only the first result (`count:1`) - used exactly where nobody is present
+to choose one: `runCoinSearch()` (the automatic path, below) and the
+quick "Retry coin lookup" button. The item detail view's own search
+(Find tab, tap any coin, "Search again") calls `searchNumista` directly
+with `count:6` and renders every candidate as a pick list instead -
+Numista's top hit is not guaranteed to be the right coin for a free-text
+search, and before this there was no way to even see whether it was
+right, let alone correct it. All three params are user-editable there
+too, since Claude can and does get the title wrong (a real
+20-cent-euro-coin test matched the wrong design entirely).
+
+**The search never runs automatically off a single photo.** `classify()`
+identifies a coin (title, material, etc.) same as any other category,
+but deliberately does not call any Numista function itself - searching
+on one side's information only to search again once a second photo
+shows up (a routine sequence, given a date or mint mark can be on either
+face) wastes a free-tier request on a result about to be superseded.
+Instead, `coinSideShot`'s handler calls `runCoinSearch()` ~1.5s after
+the two-photo re-identification finishes - same "small local pause
+before firing an external call" pattern as the initial capture debounce,
+just applied a step later. A single-photo coin gets no automatic search
+at all; "Retry coin lookup" or the detail view is how its match, if any,
+gets found.
+
+Once a search matches, opening that item's detail view separately
+fetches the full type detail (`/types/{id}`, via `fetchCoinDetail()`) to
+show the parts of the catalogue that aren't in the lean search result:
+denomination (`value.text`), composition, and each side's own
+`lettering`/`description` - lazily, only when a coin's detail view is
+actually opened, not on every automatic match, so routine capture
+doesn't pay for a second free-tier request per coin nobody asked to
+inspect. `openDetailId` guards against that lazy fetch (or a stale
+`searchNumista` candidate list) writing into the panel if the user
+closes it or opens a different item before it resolves - a real race,
+not hypothetical, given how long a network round trip can take against a
+fast local re-render.
 
 ## Printing (labels and the scale card)
 

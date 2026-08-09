@@ -1101,6 +1101,13 @@ async function resize(file,edge,quality){
   });
 }
 const b64=d=>d.split(',')[1];
+// item.approx_size_cm is a free-text-ish number from Claude ("2.2") -
+// Numista's `size` search param wants millimetres. undefined (not 0 or
+// NaN) on anything unparseable, so callers can just omit the param.
+function cmToMm(cm){
+  const n=parseFloat(cm);
+  return Number.isFinite(n) ? (n*10).toFixed(1) : undefined;
+}
 
 // A short grace period before the item is actually sent for
 // identification, keyed by item id - so tapping "+ Add another photo"
@@ -1156,12 +1163,13 @@ $('runQueue').onclick=async()=>{
 
 /* ---------------- identification ---------------- */
 const SCHEMA=`{
- "title": "3-6 words naming the object plainly",
+ "title": "3-6 words naming the object plainly. For a coin specifically, phrase it in Numista's own catalogue convention instead: denomination, then design or ruling authority, then issuing country, separated by ' - ' (for example '20 Euro Cent - Second map series - Portugal', or '1 Cent - Victoria - Canada') - matching their phrasing matters more than a natural description here, since this is what actually gets searched against their catalogue",
  "category": "one of: book, tool, kitchen, electronics, clothing, document, toy, art, furniture, sports, hobby, coin, jewellery, other",
  "material": "dominant material",
  "colour": "dominant colour",
  "approx_size_cm": "longest dimension - if a printed mm ruler is visible in the photo, read the precise measurement off it; otherwise your best visual estimate. Number only",
  "visible_text": "any text, brand, model number or title legible in the photo, verbatim; empty string if none",
+ "date_on_item": "any year or date visible on the object itself, verbatim as written (a coin's mint year, a book's copyright year, a maker's date mark); empty string if none visible",
  "condition": "one of: new, good, worn, damaged, unknown",
  "rarity_notes": "anything visible worth a second look - first-edition mark, signature, price-clipped or missing dust jacket, unusual mint mark or date, printer's key, maker's mark, or similar; empty string if nothing noticeable",
  "tags": ["3 to 6 lowercase search keywords"],
@@ -1218,15 +1226,35 @@ async function lookupBookByIsbn(isbn){
  * identifier to be clearly shown with every result plus "Numista"
  * credited as the source - not optional styling, a term of the licence -
  * so both are always rendered together, never just one. */
-async function lookupCoin(title){
-  if(!state.numistaKey) return null;
+// Numista's /types search only takes q (free text), issuer (a code, not
+// a free country name - would need a separate /issuers lookup to map
+// one to the other, not built), year/date, size, weight, and material
+// (an ID, same problem as issuer) - there is no way to search by
+// obverse/reverse lettering or denomination specifically, only q. year
+// and size are real, useful refinements though, and size is already
+// free: item.approx_size_cm just needs converting to mm.
+// count:1 + take-the-first-result silently assumes Numista's top hit is
+// the right coin - not a safe assumption for a free-text search, and
+// there was no way to tell if it wasn't. searchNumista() returns every
+// candidate in the page (up to `count`); lookupCoin() is a thin
+// convenience wrapper over it (first result only) for the paths where
+// nobody's present to choose - the automatic post-second-photo search,
+// and the quick "Retry coin lookup" button. The item detail view's own
+// search uses searchNumista() directly and shows the candidate list, so
+// a wrong top match can actually be corrected instead of silently
+// trusted.
+async function searchNumista({q,year,size,count=1}={}){
+  if(!state.numistaKey) return [];
+  if(!q && !year) return []; // API requires at least one of q/issuer/catalogue/date/year
   try{
-    const params=new URLSearchParams({q:title, category:'coin', count:'1', lang:'en'});
+    const params=new URLSearchParams({category:'coin', count:String(count), lang:'en'});
+    if(q) params.set('q',q);
+    if(year) params.set('year',year);
+    if(size) params.set('size',size);
     const r=await fetch('https://api.numista.com/api/v3/types?'+params, {headers:{'Numista-API-Key':state.numistaKey}});
-    if(!r.ok) return null;
-    const t=(await r.json()).types?.[0];
-    if(!t) return null;
-    return {
+    if(!r.ok) return [];
+    const list=(await r.json()).types||[];
+    return list.map(t=>({
       n:t.id,
       title:t.title||null,
       issuer:t.issuer?.name||null,
@@ -1235,7 +1263,42 @@ async function lookupCoin(title){
       thumbnail:t.obverse_thumbnail||null,
       reverseThumbnail:t.reverse_thumbnail||null,
       url:'https://en.numista.com/'+t.id
-    };
+    }));
+  }catch(e){ return []; }
+}
+async function lookupCoin(params){
+  const results=await searchNumista({...params,count:1});
+  return results[0]||null;
+}
+// The one place lookupCoin() is called with nobody present to pick a
+// result - after both sides of a coin are known (see coinSideShot).
+// Silent on no-match by design: this runs in the background, possibly
+// after the user has already moved on to the next box, so it behaves
+// like the rest of this app's automatic enrichment (Open Library is
+// silent on a miss too) rather than surfacing a toast for something
+// nobody explicitly asked to be told about right now.
+async function runCoinSearch(id){
+  const item=await get('items',id);
+  if(!item || item.category!=='coin') return;
+  const coin=await lookupCoin({q:item.title, year:item.date_on_item||undefined, size:cmToMm(item.approx_size_cm)});
+  if(!coin) return;
+  const fresh=await get('items',id);
+  if(!fresh) return;
+  await put('items',{...fresh,coin,updated:Date.now()});
+  await touchBox(fresh.box);
+  renderResults();
+}
+// The search result above is a lean summary - denomination and each
+// side's own lettering/description only exist on the full type detail,
+// fetched lazily (item detail view, on open, coin matches only) rather
+// than on every automatic match, so the normal capture flow doesn't pay
+// for a second free-tier request per coin it never asked to see.
+async function fetchCoinDetail(typeId){
+  if(!state.numistaKey) return null;
+  try{
+    const r=await fetch('https://api.numista.com/api/v3/types/'+typeId+'?lang=en', {headers:{'Numista-API-Key':state.numistaKey}});
+    if(!r.ok) return null;
+    return r.json();
   }catch(e){ return null; }
 }
 
@@ -1343,17 +1406,28 @@ async function classify(id,force=false){
     const text=data.content.filter(c=>c.type==='text').map(c=>c.text).join('');
     const clean=text.replace(/```json|```/g,'').trim();
     const o=JSON.parse(clean);
-    let book=null, coin=null;
+    // Coin lookup is deliberately NOT automatic here, even when
+    // category is "coin" - only ever triggered once both sides are
+    // known (see the setTimeout in coinSideShot's handler) or by an
+    // explicit tap ("Retry coin lookup", or the detail view's own
+    // search). A single photo is routinely not enough to be sure which
+    // catalogue entry is right, and searching on partial information
+    // just to search again seconds later once a second photo arrives
+    // wastes a free-tier request for a result about to be replaced -
+    // this was happening routinely before this was split out.
+    let book=null;
     if(o.category==='book') book=await lookupBookByTitle(o.title, null);
-    if(o.category==='coin') coin=await lookupCoin(o.title);
     // Re-fetch right before this final write rather than reusing the
     // `item` snapshot from the top of this call - a second photo can
     // have been added (full2/thumb2) while this request was in flight,
     // and writing the stale snapshot back would silently erase it. Same
     // class of bug as the DB_VER walkCursor issue documented in
-    // CLAUDE.md: two independent read-modify-write passes racing.
+    // CLAUDE.md: two independent read-modify-write passes racing. The
+    // spread order here also matters for `coin` specifically: `o` never
+    // has a `coin` key, so `latest.coin` (whatever a previous search
+    // already found) survives untouched through a re-identification.
     const latest=await get('items',id) || item;
-    await put('items',{...latest,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book,coin});
+    await put('items',{...latest,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book});
     await touchBox(item.box);
     if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
     renderQueue();
@@ -1441,7 +1515,7 @@ async function renderResults(){
     const item=await get('items',id);
     if(!item) return;
     toast('Searching Numista…');
-    const coin=await lookupCoin(item.title);
+    const coin=await lookupCoin({q:item.title, year:item.date_on_item||undefined, size:cmToMm(item.approx_size_cm)});
     if(!coin) return toast('No match on Numista for "'+item.title+'"');
     await put('items',{...item,coin,updated:Date.now()});
     await touchBox(item.box);
@@ -1471,6 +1545,7 @@ async function renderDetailHtml(item){
     detailRow('Confidence', item.confidence!=null?Math.round(item.confidence*100)+'%':'—'),
   ];
   if(item.visible_text) rows.push(detailRow('Visible text', '“'+esc(item.visible_text)+'”'));
+  if(item.date_on_item) rows.push(detailRow('Date on item', esc(item.date_on_item)));
   if(item.tags?.length) rows.push(detailRow('Tags', esc(item.tags.join(', '))));
   if(item.rarity_notes) rows.push(detailRow('Worth a look', esc(item.rarity_notes)));
   rows.push(detailRow('Added', new Date(item.created).toLocaleString()));
@@ -1489,13 +1564,23 @@ async function renderDetailHtml(item){
         ${item.coin.thumbnail?`<img src="${esc(item.coin.thumbnail)}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`:''}
         ${item.coin.reverseThumbnail?`<img src="${esc(item.coin.reverseThumbnail)}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`:''}
       </div>`:''}
+      <div id="coinDetailExtra" style="font-size:13px;color:var(--muted)">Loading obverse/reverse detail…</div>
     `:'<p style="font-size:13px;color:var(--muted);margin:8px 0">No Numista match yet.</p>';
+    // Only q and year are text Claude/the user can realistically supply;
+    // size is real too but comes from approx_size_cm, not typed fresh -
+    // see the CSS/lookupCoin comments for why these three specifically
+    // (Numista's search has no field for "text on the reverse").
     coinHtml=`<div style="margin-top:14px">
       <div class="eyebrow" style="margin-bottom:8px">Numista search</div>
       ${current}
       <label class="field"><span>Text sent to Numista - edit and search again if a match looks wrong</span>
         <input type="text" id="numistaQuery" value="${esc(item.title||'')}"></label>
+      <label class="field"><span>Year as written on the coin (optional - a range like 1990-2000 also works)</span>
+        <input type="text" id="numistaYear" value="${esc(item.date_on_item||'')}" placeholder="e.g. 1998"></label>
+      <label class="field"><span>Size in mm (optional)</span>
+        <input type="text" id="numistaSize" value="${cmToMm(item.approx_size_cm)||''}"></label>
       <button id="numistaRerun" style="width:100%">Search again</button>
+      <div id="numistaCandidates"></div>
     </div>`;
   }
 
@@ -1508,31 +1593,72 @@ async function renderDetailHtml(item){
     ${coinHtml}
   `;
 }
+let openDetailId=null;
+async function loadCoinDetailExtra(item){
+  const detail=await fetchCoinDetail(item.coin.n);
+  // The panel may have been closed or switched to a different item by
+  // the time this resolves - only write into it if it's still showing
+  // the item this fetch was for.
+  if(openDetailId!==item.id) return;
+  const box=$('coinDetailExtra');
+  if(!box) return;
+  if(!detail){ box.textContent='Could not load extra detail from Numista.'; return; }
+  const parts=[];
+  if(detail.value?.text) parts.push(detailRow('Denomination', esc(detail.value.text)));
+  if(detail.composition?.text) parts.push(detailRow('Composition', esc(detail.composition.text)));
+  if(detail.obverse?.lettering) parts.push(detailRow('Obverse text (Numista)', esc(detail.obverse.lettering).replace(/\n/g,'<br>')));
+  if(detail.obverse?.description) parts.push(detailRow('Obverse design', esc(detail.obverse.description)));
+  if(detail.reverse?.lettering) parts.push(detailRow('Reverse text (Numista)', esc(detail.reverse.lettering).replace(/\n/g,'<br>')));
+  if(detail.reverse?.description) parts.push(detailRow('Reverse design', esc(detail.reverse.description)));
+  box.outerHTML=parts.length?parts.join(''):'<p style="font-size:13px;color:var(--muted)">No extra detail on Numista for this entry.</p>';
+}
 async function openItemDetail(id){
   const item=await get('items',id);
   if(!item) return;
+  openDetailId=id;
   $('detailPanel').innerHTML=await renderDetailHtml(item);
   $('detailOverlay').classList.remove('hidden');
   $('detailClose').onclick=closeDetail;
+  if(item.category==='coin' && item.coin) loadCoinDetailExtra(item);
   const rerun=$('numistaRerun');
   if(rerun) rerun.onclick=async()=>{
     const q=$('numistaQuery').value.trim();
-    if(!q) return toast('Enter a search term first');
+    const year=$('numistaYear').value.trim();
+    const size=$('numistaSize').value.trim();
+    if(!q && !year) return toast('Enter a search term or a year first');
     if(!state.numistaKey) return toast('Add a Numista API key under Setup first');
     toast('Searching Numista…');
-    const coin=await lookupCoin(q);
-    if(!coin) return toast('No match on Numista for "'+q+'"');
-    const fresh=await get('items',id);
-    await put('items',{...fresh,coin,updated:Date.now()});
-    await touchBox(fresh.box);
-    toast('Found: '+(coin.title||coin.issuer||'a match'));
-    openItemDetail(id);
-    renderResults();
+    // Numista's top result isn't necessarily the right coin - a
+    // free-text search has no way to be certain - so this shows up to
+    // 6 candidates to choose from instead of silently trusting #1.
+    const results=await searchNumista({q,year,size,count:6});
+    const box=$('numistaCandidates');
+    if(!results.length){ if(box) box.innerHTML='<p style="font-size:13px;color:var(--muted);margin-top:8px">No matches for that search.</p>'; return; }
+    if(!box) return;
+    box.innerHTML='<div class="eyebrow" style="margin:10px 0 6px">Pick the right match</div>'
+      + results.map(c=>`<div class="detail-row" data-pick="${c.n}" style="cursor:pointer">
+          <span class="k" style="display:flex;align-items:center;gap:8px">
+            ${c.thumbnail?`<img src="${esc(c.thumbnail)}" alt="" style="width:32px;height:32px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">`:''}
+            ${esc(c.title||'Untitled')}
+          </span>
+          <span class="v">${esc(c.issuer||'')}${c.minYear?' · '+c.minYear:''}<br>N#${c.n}</span>
+        </div>`).join('');
+    box.querySelectorAll('[data-pick]').forEach(row=>row.onclick=async()=>{
+      const chosen=results.find(r=>String(r.n)===row.dataset.pick);
+      if(!chosen) return;
+      const fresh=await get('items',id);
+      await put('items',{...fresh,coin:chosen,updated:Date.now()});
+      await touchBox(fresh.box);
+      toast('Set to: '+(chosen.title||chosen.issuer||'that match'));
+      openItemDetail(id);
+      renderResults();
+    });
   };
 }
 function closeDetail(){
   $('detailOverlay').classList.add('hidden');
   $('detailPanel').innerHTML='';
+  openDetailId=null;
 }
 $('detailOverlay').onclick=e=>{ if(e.target===$('detailOverlay')) closeDetail(); };
 
@@ -1597,7 +1723,16 @@ $('coinSideShot').onchange=async e=>{
     await put('items',{...item, full2, thumb2, updated:Date.now()});
     await touchBox(item.box);
     renderResults();
-    if(state.key){ toast('Re-identifying with both sides…'); await classify(id,true); renderResults(); }
+    if(state.key){
+      toast('Re-identifying with both sides…');
+      await classify(id,true);
+      renderResults();
+      // Both sides are known now, but a short pause before searching
+      // rather than firing the instant classify() resolves - matches
+      // the same "don't fire an external call the instant something
+      // happens" pattern as the initial capture debounce.
+      setTimeout(()=>runCoinSearch(id), 1500);
+    }
     else toast('Other side added');
   }catch(err){ toast(err.message); }
 };

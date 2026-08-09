@@ -111,52 +111,71 @@ something is actually worth.
 
 ## Coin lookup
 
-Anything identified as a coin gets an automatic, free lookup against
-Numista by title, shown under the item with its Numista catalogue number
-(N#, a clickable link back to the real Numista page) as their terms
-require — plus Numista's own photo of that catalogue entry, shown right
-there, so a text-only match can be visually checked at a glance rather
-than trusted blind or clicked through to confirm. If it doesn't look
-right, that's what the image search batch (below) is for. Add a free
-Numista API key under Setup, "Coin lookup", to turn this on — no key,
-no automatic lookup. If a coin was identified *before* the key was
-added, it won't have a match yet either — a **"Retry coin lookup"**
-button appears on any coin item missing one, and just re-runs the free
-search using the title Claude already gave it, no new photo needed.
+Anything identified as a coin can be looked up against Numista's
+catalogue — but not automatically off a single photo. A coin's date or
+mint mark can be on either face, so a search run before both sides are
+even in wouldn't necessarily find the right entry, and searching twice
+(once per photo) would just waste your Numista quota on a result about
+to be replaced. So: taking one photo identifies the object (title,
+material, etc.) same as anything else, with no coin match yet. Add a
+free Numista API key under Setup, "Coin lookup", to enable matching at
+all — no key, no lookup, ever.
 
-If the text search doesn't find a match, it just stays unmatched — there's
-no automatic image fallback, because Numista's image-search endpoint needs
-their paid plan (€100/month minimum). Setup has a **"Run image search on
-unmatched coins"** button instead: it shows you the real estimated cost
-first, and is meant to be run as an occasional batch once a backlog of
-unmatched coins has built up, not per-coin. Numista waives the €100
-monthly minimum for the first calendar month a paid plan is active, so
-the intended pattern is: activate the plan, run the batch once, then
-cancel or downgrade before the next billing month.
+Right after taking a photo, the Capture tab offers **"+ Add another
+photo"** — flip the coin over and photograph the other face there and
+then, no need to switch tabs. The same button also appears on any coin
+item afterwards, on the Find tab. Either way, Claude re-identifies the
+item using both photos together, and about a second and a half later
+the Numista search runs on its own using that fuller picture. If you
+only ever take one photo, that's fine too — nothing forces a second —
+but it means no automatic match; tap **"Retry coin lookup"** (Find tab,
+appears on any coin without one) whenever you want a search run on what
+you've got.
 
-A coin's date or mint mark can end up on either face, so one photo is
-routinely not enough — but capture stays one tap, one photo, exactly as
-fast as any other object. Right after taking a photo, the Capture tab
-itself offers **"+ Add another photo"** — flip the coin over and
-photograph the other face there and then, no need to switch to Find
-first. The same button also appears on any coin item afterwards, on
-the Find tab. Either way, Claude re-identifies the item using both
-photos together rather than guessing from just the one it already had.
-Entirely optional — an item with just one photo works fine and nothing
-prompts you to add the second. Sending a second photo roughly doubles
-that item's identification cost, same as any extra image in the request.
+A text search has no way to guarantee its top result is the right coin
+— confirmed a real case where it wasn't, during testing, a wrong match
+on the reverse of a 20-cent-euro coin. So the automatic search and the
+quick "Retry coin lookup" button both take the top result on trust (the
+same tradeoff Open Library's book lookup already makes), but the item
+detail view's own search (tap any coin, "Search again") shows up to six
+candidates to choose from instead of picking one for you — pick the
+right one directly, rather than trusting a guess.
+
+Once matched, the coin's N# is a clickable link back to the real
+Numista page, and Numista's own photo of that catalogue entry shows
+right there so a match can be visually checked at a glance. Opening the
+item's detail view also loads the fuller picture from Numista — the
+denomination, composition, and each side's own recorded lettering and
+design description — to compare against what's actually on the coin.
+
+If the text search doesn't find a match at all, it just stays
+unmatched — there's no automatic image fallback, because Numista's
+image-search endpoint needs their paid plan (€100/month minimum). Setup
+has a **"Run image search on unmatched coins"** button instead: it
+shows you the real estimated cost first, and is meant to be run as an
+occasional batch once a backlog of unmatched coins has built up, not
+per-coin. Numista waives the €100 monthly minimum for the first
+calendar month a paid plan is active, so the intended pattern is:
+activate the plan, run the batch once, then cancel or downgrade before
+the next billing month.
+
+Sending a second photo to Claude roughly doubles that item's
+identification cost, same as any extra image in the request; the
+Numista search itself, automatic or manual, is free either way.
 
 ## Item detail
 
 Tap any item on the Find tab (not its photo-strip's delete button) to
 open a full detail view: every field Claude filled in, both photos if
-there are two, and — for a coin — the exact text that was sent to
-Numista, in an editable box with a **"Search again"** button next to
-it. If Claude's title sends the search astray (a real 20-cent-euro-coin
-test during development matched the wrong design entirely), correct it
-there and re-search — free, no new photo, no re-identification needed.
-Nothing else on this screen is editable yet; deleting and re-capturing
-is still the way to fix a wrong category, material, or title.
+there are two, and — for a coin — three editable search fields (the
+text sent to Numista, a year, and a size in mm, the last two pre-filled
+from whatever's already known) with a **"Search again"** button.
+Searching there shows up to six candidates to pick from, not just one
+guess, so a wrong top match (a real 20-cent-euro-coin test during
+development landed on the wrong design entirely) can actually be
+corrected — free, no new photo, no re-identification needed. Nothing
+else on this screen is editable yet; deleting and re-capturing is still
+the way to fix a wrong category, material, or title.
 
 ## Photo scale card
 
