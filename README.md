@@ -136,13 +136,27 @@ cancel or downgrade before the next billing month.
 
 A coin's date or mint mark can end up on either face, so one photo is
 routinely not enough — but capture stays one tap, one photo, exactly as
-fast as any other object. A coin item that's been identified gets a
-**"+ Add other side"** button on the Find tab: photograph the other
-face and Claude re-identifies the item using both photos together,
-rather than guessing from just the one it already had. Entirely
-optional — an item with just one photo works fine and nothing prompts
-you to add the second. Sending a second photo roughly doubles that
-item's identification cost, same as any extra image in the request.
+fast as any other object. Right after taking a photo, the Capture tab
+itself offers **"+ Add another photo"** — flip the coin over and
+photograph the other face there and then, no need to switch to Find
+first. The same button also appears on any coin item afterwards, on
+the Find tab. Either way, Claude re-identifies the item using both
+photos together rather than guessing from just the one it already had.
+Entirely optional — an item with just one photo works fine and nothing
+prompts you to add the second. Sending a second photo roughly doubles
+that item's identification cost, same as any extra image in the request.
+
+## Item detail
+
+Tap any item on the Find tab (not its photo-strip's delete button) to
+open a full detail view: every field Claude filled in, both photos if
+there are two, and — for a coin — the exact text that was sent to
+Numista, in an editable box with a **"Search again"** button next to
+it. If Claude's title sends the search astray (a real 20-cent-euro-coin
+test during development matched the wrong design entirely), correct it
+there and re-search — free, no new photo, no re-identification needed.
+Nothing else on this screen is editable yet; deleting and re-capturing
+is still the way to fix a wrong category, material, or title.
 
 ## Photo scale card
 

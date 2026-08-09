@@ -161,6 +161,25 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
 .status.on{opacity:1}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
+/* item detail overlay */
+.overlay{
+  position:fixed;inset:0;z-index:50;
+  background:rgba(17,20,24,.5);
+  display:flex;align-items:flex-end;justify-content:center;
+}
+.overlay.hidden{display:none}
+.detail-panel{
+  background:var(--card);width:100%;max-width:720px;max-height:86vh;
+  overflow-y:auto;border-radius:16px 16px 0 0;
+  padding:18px 16px calc(18px + var(--pad));
+}
+.detail-panel h2{font-size:19px;padding-right:70px}
+.detail-photos{display:flex;gap:8px;margin:12px 0}
+.detail-photos img{width:110px;height:110px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+.detail-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
+.detail-row .k{color:var(--muted);flex:0 0 auto}
+.detail-row .v{text-align:right}
+
 /* print sheet */
 #sheet{display:none}
 .label{
@@ -442,6 +461,7 @@ nav button[aria-current=page] svg{stroke:var(--signal)}
 
 <div class="status" id="toast" role="status" aria-live="polite"></div>
 <div id="sheet"></div>
+<div class="overlay hidden" id="detailOverlay"><div class="detail-panel" id="detailPanel"></div></div>
 
 <script src="qrcode.js"></script>
 <script>
@@ -1082,6 +1102,14 @@ async function resize(file,edge,quality){
 }
 const b64=d=>d.split(',')[1];
 
+// A short grace period before the item is actually sent for
+// identification, keyed by item id - so tapping "+ Add another photo"
+// right after capture (flipping a coin over, say) cancels this and lets
+// the two-photo identification from coinSideShot's handler be the only
+// API call that fires, rather than racing a single-photo one already
+// in flight. Purely a local timer, not a network wait, so it doesn't
+// slow down capturing the next object.
+const pendingClassify={};
 $('shot').onchange=async e=>{
   const file=e.target.files[0]; e.target.value='';
   if(!file) return;
@@ -1094,7 +1122,7 @@ $('shot').onchange=async e=>{
     await touchBox(item.box);
     showLast(item);
     renderQueue();
-    if(state.key) classify(id);
+    if(state.key) pendingClassify[id]=setTimeout(()=>{ delete pendingClassify[id]; classify(id); }, 1500);
   }catch(err){ toast(err.message); }
 };
 
@@ -1102,7 +1130,14 @@ function showLast(item){
   $('lastAdded').innerHTML=`<div class="card"><div class="item">
     <img src="${item.thumb}" alt="">
     <div class="body"><h3 id="lastTitle">${esc(item.title)}</h3>
-      <p id="lastSub">Saved to ${esc(item.box)}</p></div></div></div>`;
+      <p id="lastSub">Saved to ${esc(item.box)}</p>
+      <button id="lastAddSide" style="margin-top:8px">+ Add another photo (e.g. a coin's other side)</button>
+    </div></div></div>`;
+  $('lastAddSide').onclick=()=>{
+    if(pendingClassify[item.id]){ clearTimeout(pendingClassify[item.id]); delete pendingClassify[item.id]; }
+    coinSideTargetId=item.id;
+    $('coinSideShot').click();
+  };
 }
 
 async function renderQueue(){
@@ -1262,9 +1297,20 @@ async function runImageSearchBatch(){
 }
 $('runImageSearch').onclick=runImageSearchBatch;
 
+// Ids currently mid-identification - guards against two overlapping
+// Claude calls for the same item (the "+ Add another photo" debounce in
+// $('shot').onchange covers the common case, but if a second photo
+// still arrives after that debounce has already fired, this stops a
+// second wasted API call rather than letting them race). If this skips
+// a genuine two-photo re-run, the photo itself is never lost - see the
+// re-fetch immediately before the final write below - so at worst a
+// second "+ Add other side" tap is needed, not a repeat of that photo.
+const classifying=new Set();
 async function classify(id,force=false){
+  if(classifying.has(id)) return;
   const item=await get('items',id);
   if(!item||(item.state==='done' && !force)) return;
+  classifying.add(id);
   const prevState=item.state;
   await put('items',{...item,state:'working',updated:Date.now()});
   try{
@@ -1300,13 +1346,22 @@ async function classify(id,force=false){
     let book=null, coin=null;
     if(o.category==='book') book=await lookupBookByTitle(o.title, null);
     if(o.category==='coin') coin=await lookupCoin(o.title);
-    await put('items',{...item,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book,coin});
+    // Re-fetch right before this final write rather than reusing the
+    // `item` snapshot from the top of this call - a second photo can
+    // have been added (full2/thumb2) while this request was in flight,
+    // and writing the stale snapshot back would silently erase it. Same
+    // class of bug as the DB_VER walkCursor issue documented in
+    // CLAUDE.md: two independent read-modify-write passes racing.
+    const latest=await get('items',id) || item;
+    await put('items',{...latest,...o,tags:Array.isArray(o.tags)?o.tags:[],state:'done',updated:Date.now(),book,coin});
     await touchBox(item.box);
     if($('lastTitle')) { $('lastTitle').textContent=o.title; $('lastSub').textContent=(o.visible_text||o.material||'')+' · '+item.box; }
     renderQueue();
   }catch(err){
     await put('items',{...item,state:prevState});
     toast(err.message);
+  }finally{
+    classifying.delete(id);
   }
 }
 
@@ -1334,7 +1389,7 @@ async function renderResults(){
     $('results').innerHTML=`<div class="empty"><strong>Nothing here</strong>${q?'No object matches those words. Try the material or a word printed on it.':'Photograph something on the Capture tab and it will appear here.'}</div>`;
     return;
   }
-  $('results').innerHTML=items.map(i=>`<div class="card"><div class="item">
+  $('results').innerHTML=items.map(i=>`<div class="card"><div class="item" data-open="${i.id}">
     <div style="display:flex;gap:4px">
       <img src="${i.thumb}" alt="" loading="lazy">
       ${i.thumb2?`<img src="${i.thumb2}" alt="" loading="lazy" style="border-radius:8px">`:''}
@@ -1364,6 +1419,14 @@ async function renderResults(){
     </div>
     <button data-del="${i.id}" data-delbox="${esc(i.box)}" class="danger" aria-label="Delete">✕</button>
   </div></div>`).join('');
+  // Opens the detail view for anything that isn't itself a button or
+  // link inside the card (delete, retry, add-a-photo, the Numista
+  // link) - those need their own click to reach the user, not have it
+  // swallowed by also opening the detail view underneath them.
+  $('results').querySelectorAll('[data-open]').forEach(el=>el.onclick=ev=>{
+    if(ev.target.closest('button,a')) return;
+    openItemDetail(Number(el.dataset.open));
+  });
   $('results').querySelectorAll('[data-isbn]').forEach(b=>b.onclick=()=>{ isbnTargetId=Number(b.dataset.isbn); $('isbnShot').click(); });
   $('results').querySelectorAll('[data-coinside]').forEach(b=>b.onclick=()=>{ coinSideTargetId=Number(b.dataset.coinside); $('coinSideShot').click(); });
   // Free, no photo, no Claude call - just re-runs the Numista text search
@@ -1389,6 +1452,90 @@ async function renderResults(){
     await del('items',Number(b.dataset.del)); await touchBox(b.dataset.delbox); renderResults(); toast('Deleted');
   });
 }
+
+/* ---------------- item detail ---------------- */
+function detailRow(k,v){
+  return `<div class="detail-row"><span class="k">${esc(k)}</span><span class="v">${v}</span></div>`;
+}
+async function renderDetailHtml(item){
+  const box=(await getAll('boxes')).find(b=>b.code===item.box);
+  const house=box? (await getAll('houses')).find(h=>h.id===box.house) : null;
+  const photos=[item.full,item.full2].filter(Boolean);
+  const rows=[
+    detailRow('Location', esc(item.box)+(house?' · '+esc(house.name||''):'')),
+    detailRow('Category', item.category?esc(item.category):'—'),
+    detailRow('Material', item.material?esc(item.material):'—'),
+    detailRow('Colour', item.colour?esc(item.colour):'—'),
+    detailRow('Approx. size', item.approx_size_cm?esc(item.approx_size_cm)+' cm':'—'),
+    detailRow('Condition', item.condition?esc(item.condition):'—'),
+    detailRow('Confidence', item.confidence!=null?Math.round(item.confidence*100)+'%':'—'),
+  ];
+  if(item.visible_text) rows.push(detailRow('Visible text', '“'+esc(item.visible_text)+'”'));
+  if(item.tags?.length) rows.push(detailRow('Tags', esc(item.tags.join(', '))));
+  if(item.rarity_notes) rows.push(detailRow('Worth a look', esc(item.rarity_notes)));
+  rows.push(detailRow('Added', new Date(item.created).toLocaleString()));
+  rows.push(detailRow('Status', item.state==='done'?'Identified':(item.state==='working'?'Identifying…':'Waiting to be identified')));
+
+  let bookHtml='';
+  if(item.book){
+    bookHtml=detailRow('Open Library', esc(item.book.author||'Unknown author')+(item.book.year?' · '+esc(String(item.book.year)):''));
+  }
+
+  let coinHtml='';
+  if(item.category==='coin'){
+    const current=item.coin?`
+      ${detailRow('Current match', esc(item.coin.issuer||'Unknown issuer')+(item.coin.minYear?' · '+item.coin.minYear:'')+' · <a href="'+esc(item.coin.url)+'" target="_blank" rel="noopener">N#'+item.coin.n+'</a>')}
+      ${item.coin.thumbnail||item.coin.reverseThumbnail?`<div style="display:flex;gap:6px;margin:8px 0">
+        ${item.coin.thumbnail?`<img src="${esc(item.coin.thumbnail)}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`:''}
+        ${item.coin.reverseThumbnail?`<img src="${esc(item.coin.reverseThumbnail)}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`:''}
+      </div>`:''}
+    `:'<p style="font-size:13px;color:var(--muted);margin:8px 0">No Numista match yet.</p>';
+    coinHtml=`<div style="margin-top:14px">
+      <div class="eyebrow" style="margin-bottom:8px">Numista search</div>
+      ${current}
+      <label class="field"><span>Text sent to Numista - edit and search again if a match looks wrong</span>
+        <input type="text" id="numistaQuery" value="${esc(item.title||'')}"></label>
+      <button id="numistaRerun" style="width:100%">Search again</button>
+    </div>`;
+  }
+
+  return `
+    <button id="detailClose" style="float:right">Close</button>
+    <h2>${esc(item.title||'Untitled')}</h2>
+    <div class="detail-photos">${photos.map(p=>`<img src="${p}" alt="">`).join('')}</div>
+    ${rows.join('')}
+    ${bookHtml}
+    ${coinHtml}
+  `;
+}
+async function openItemDetail(id){
+  const item=await get('items',id);
+  if(!item) return;
+  $('detailPanel').innerHTML=await renderDetailHtml(item);
+  $('detailOverlay').classList.remove('hidden');
+  $('detailClose').onclick=closeDetail;
+  const rerun=$('numistaRerun');
+  if(rerun) rerun.onclick=async()=>{
+    const q=$('numistaQuery').value.trim();
+    if(!q) return toast('Enter a search term first');
+    if(!state.numistaKey) return toast('Add a Numista API key under Setup first');
+    toast('Searching Numista…');
+    const coin=await lookupCoin(q);
+    if(!coin) return toast('No match on Numista for "'+q+'"');
+    const fresh=await get('items',id);
+    await put('items',{...fresh,coin,updated:Date.now()});
+    await touchBox(fresh.box);
+    toast('Found: '+(coin.title||coin.issuer||'a match'));
+    openItemDetail(id);
+    renderResults();
+  };
+}
+function closeDetail(){
+  $('detailOverlay').classList.add('hidden');
+  $('detailPanel').innerHTML='';
+}
+$('detailOverlay').onclick=e=>{ if(e.target===$('detailOverlay')) closeDetail(); };
+
 $('q').oninput=renderResults;
 $('filterBox').onchange=renderResults;
 

@@ -45,6 +45,9 @@ Android Chrome also supported for install/camera/PWA).
 | Scale card uses literal `mm` CSS units, same as the label sheet | Already proven physically accurate for printed labels at 96dpi-equivalent CSS mm. Reusing it for the ruler means the same `@page`/print pipeline and the same "print at Actual size" caveat, rather than a second unit system to get right. |
 | Scale card is two L-shaped corner rulers (one per coin side), not one linear ruler | A linear ruler laid next to an object only reads one axis; an L-shaped corner ruler, with the object placed flush into the corner, reads width and height from a single photo. Two of them, each framing a dotted "OBVERSE"/"REVERSE" placement circle, doubles as the obverse/reverse side-tracking the coin module needed - the printed label is what tells Claude which side it's looking at, since it's in the photo itself, not a separate data field. The alternating black/grey segment bar above each ruler's tick marks is a coarse, at-a-glance scale that doesn't require reading a number, sitting above the precise numbered ticks rather than replacing them. |
 | A second photo is opt-in, added after the fact, not a required second capture step | A coin's date or mint mark can end up on either face, so one photo is routinely not enough to be sure - but making every capture a two-photo step would slow down the fast one-tap-per-object flow the whole app is built around, for every category, not just coins. `full2`/`thumb2` stay `undefined` unless the user deliberately taps "+ Add other side" afterwards. |
+| "+ Add another photo" also lives on the Capture tab, not just Find | Originally only reachable from the Find tab, which meant leaving the tab you're actively packing from just to flip a coin over - real friction for something meant to save a step, reported directly. `showLast()` now offers the same action immediately after a capture, and `$('shot').onchange` gives the initial identification a 1.5s local timer (not a network wait) before firing, specifically so tapping this within that window results in one two-photo `classify()` call instead of two racing single-photo ones. |
+| `classify()` re-fetches the item immediately before its final write, rather than reusing its start-of-call snapshot | The same class of bug as the `DB_VER`/`walkCursor` issue above: if a second photo is added to an item while its first identification call is still in flight, writing back a stale snapshot at the end would silently erase that photo. A `classifying` `Set` also skips a second identification call for an item already mid-identification, so two photos added in quick succession don't fire two overlapping (and double-cost) Claude calls - if that skip ever means the second photo isn't factored in immediately, the photo itself is never lost, just needs one more tap to force a re-run. |
+| Item detail view opens on tap, not a separate route/tab | A modal overlay (`#detailOverlay`) keeps this to one file with no router, consistent with the rest of the app. It exists specifically because the compact result card doesn't have room for every field, and because a wrong Numista match (Claude's title genuinely leading it astray - a real 20-cent-euro-coin case, not hypothetical) needed a place to fix the search text and retry without a full re-identification. |
 
 ## Files
 
@@ -361,7 +364,12 @@ the install prompt works without any certificate.
    not left open).
 2. Scan a printed label to jump to that box's contents. Needs jsQR, since
    Safari has no `BarcodeDetector`.
-3. Edit an item's fields after identification. Currently delete-only.
+3. Edit an item's fields after identification. Still delete-only for
+   most fields - the item detail view (tap any item on the Find tab)
+   added one narrow exception: the text sent to Numista is editable and
+   re-searchable there, because a wrong Claude title is otherwise a
+   dead end for finding the right coin. General field editing (title,
+   category, material, etc.) is still not built.
 4. Store photos as Blobs rather than data URLs, about 33% space saving and
    much cheaper to list/search since `getAll('items')` stops dragging full
    photo bytes through memory for every row. **Priority note:** the stated
